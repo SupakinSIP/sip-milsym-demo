@@ -45,9 +45,18 @@ export function EditToolbar(): React.JSX.Element | null {
   const name = sketch
     ? (sketchKindOf(sketch.kindId)?.label ?? "sketch")
     : (graphic?.name ?? "graphic");
+  // An axis graphic's last point is its width, which is not removable — so its floor is
+  // two centre-line points and the width, and Remove has to grey out one point sooner
+  // than the generic minimum would.
+  const hasWidthPoint =
+    graphic !== null &&
+    graphic.drawRuleName.startsWith("AXIS") &&
+    graphic.points.length >= 3;
   const floor = sketch
     ? (sketchKindOf(sketch.kindId)?.minPoints ?? 2)
-    : 2;
+    : hasWidthPoint
+      ? 3
+      : 2;
 
   return (
     <div className="edittools" role="toolbar" aria-label="Point editor">
@@ -86,7 +95,9 @@ export function EditToolbar(): React.JSX.Element | null {
       </div>
       <span className="edittools__hint">
         {editMode === "move"
-          ? "drag a handle"
+          ? hasWidthPoint
+            ? "drag a handle · W is the width"
+            : "drag a handle"
           : editMode === "add"
             ? "click the map to insert"
             : "click a handle to delete"}

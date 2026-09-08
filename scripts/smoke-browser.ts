@@ -41,14 +41,19 @@ import {
 } from "../src/symbology/coverage.js";
 import { crosswalk } from "../src/symbology/crosswalk.js";
 import {
+  axisComponentsOf,
   axisHalfWidthMetres,
+  axisHeadDepthMetres,
   axisWidthCheck,
   axisWidthPoint,
   clickBudgetForRule,
   controlPointsForRule,
   renderGraphic,
 } from "../src/symbology/renderGraphic.js";
-import { useDemoStore } from "../src/state/useDemoStore.js";
+import {
+  useDemoStore,
+  type PlacedGraphic,
+} from "../src/state/useDemoStore.js";
 import {
   arrow,
   obstacleX,
@@ -865,28 +870,160 @@ check(
   { note: "four shapes of axis, including a dog-leg with a metres-long final leg" },
 );
 
+/**
+ * The derived point resolved into the two components the rule gives it: how far back
+ * along the axis (the back of the arrowhead) and how far across it (the width).
+ */
+const axisOffsetComponents = (
+  centreLine: readonly (readonly [number, number])[],
+): { along: number; across: number } => {
+  const tip = centreLine[0]!;
+  const next = centreLine[1]!;
+  const width = axisWidthPoint(centreLine);
+  const scale = Math.cos((tip[1] * Math.PI) / 180) * 111320;
+  const legX = (next[0] - tip[0]) * scale;
+  const legY = (next[1] - tip[1]) * 111320;
+  const length = Math.hypot(legX, legY);
+  const ux = legX / length;
+  const uy = legY / length;
+  const offX = (width[0] - tip[0]) * scale;
+  const offY = (width[1] - tip[1]) * 111320;
+  return { along: offX * ux + offY * uy, across: Math.abs(offX * -uy + offY * ux) };
+};
+
 check(
-  // The derived point is perpendicular to leg one and offset from the **tip**, because
-  // that is the geometry the stray measurement was taken against. Checked as a right
-  // angle rather than by eye: the dot product of the leg and the offset.
-  "the derived width point is square off the arrowhead",
+  // Point N has **two jobs** under AXIS2 — the width, and the back of the arrowhead —
+  // and the first version of this derivation only did the first: offset square off the
+  // tip, the head's back is level with its own point and the renderer draws a blunt
+  // stub. The setback is what makes it an arrow, so both components are locked.
+  "the derived point carries both a width and a head depth",
   (() => {
     const centreLine: [number, number][] = [
       [100.7, 13.63],
       [100.36, 13.62],
     ];
-    const width = axisWidthPoint(centreLine);
-    const scale = Math.cos((13.63 * Math.PI) / 180) * 111320;
-    const legX = (centreLine[1]![0] - centreLine[0]![0]) * scale;
-    const legY = (centreLine[1]![1] - centreLine[0]![1]) * 111320;
-    const offX = (width[0] - centreLine[0]![0]) * scale;
-    const offY = (width[1] - centreLine[0]![1]) * 111320;
-    const dot = legX * offX + legY * offY;
-    const lengths = Math.hypot(legX, legY) * Math.hypot(offX, offY);
-    return Math.abs(dot / lengths) < 1e-6;
+    const { along, across } = axisOffsetComponents(centreLine);
+    const half = axisHalfWidthMetres(centreLine);
+    const depth = axisHeadDepthMetres(centreLine);
+    return (
+      Math.abs(across - half) < 1 &&
+      Math.abs(along - depth) < 1 &&
+      // Set back toward the rear, not out in front of the arrowhead.
+      along > 0 &&
+      Math.abs(depth / half - 1.5) < 0.01
+    );
   })(),
-  { note: "the dot product of leg one and the derived offset is zero" },
+  (() => {
+    const centreLine: [number, number][] = [
+      [100.7, 13.63],
+      [100.36, 13.62],
+    ];
+    const { along, across } = axisOffsetComponents(centreLine);
+    return { alongAxis: Math.round(along), acrossAxis: Math.round(across) };
+  })(),
 );
+
+/**
+ * The drawn arrowhead, measured in the axis's own frame: x back from the tip along the
+ * centre line, y across it. The head and the corridor share a half width, so the vertex
+ * of greatest |y| is a barb tip and **its x is how deep the head is** — which is the
+ * whole difference between an arrow and a stub, and it is a property of the drawn
+ * geometry rather than of the control points.
+ */
+const arrowheadOf = (
+  control: readonly (readonly [number, number])[],
+): { depth: number; flare: number } => {
+  const result = renderGraphic(MAIN_ATTACK, control);
+  const tip = control[0]!;
+  const next = control[1]!;
+  const scale = Math.cos((tip[1] * Math.PI) / 180) * 111320;
+  const legX = (next[0] - tip[0]) * scale;
+  const legY = (next[1] - tip[1]) * 111320;
+  const length = Math.hypot(legX, legY);
+  const ux = legX / length;
+  const uy = legY / length;
+  let depth = 0;
+  let flare = 0;
+  const walk = (c: unknown): void => {
+    if (Array.isArray(c) && typeof c[0] === "number") {
+      const mx = ((c[0] as number) - tip[0]) * scale;
+      const my = ((c[1] as number) - tip[1]) * 111320;
+      const across = Math.abs(mx * -uy + my * ux);
+      if (across > flare) {
+        flare = across;
+        depth = mx * ux + my * uy;
+      }
+    } else if (Array.isArray(c)) {
+      c.forEach(walk);
+    }
+  };
+  if (result.ok) {
+    for (const feature of result.collection.features) {
+      if (feature.geometry.type === "Point") {
+        continue;
+      }
+      walk(feature.geometry.coordinates);
+    }
+  }
+  return { depth, flare };
+};
+
+/** The two clicks, and the two width points to draw them with. */
+const HEAD_CLICKS: [number, number][] = [
+  [100.36, 13.62],
+  [100.7, 13.63],
+];
+const HEAD_CENTRE_LINE = [...HEAD_CLICKS].reverse();
+const headHalf = axisHalfWidthMetres(HEAD_CENTRE_LINE);
+/** Square off the tip: a correct width, no head depth. What was drawn before. */
+const bluntControl: [number, number][] = (() => {
+  const tip = HEAD_CENTRE_LINE[0]!;
+  const next = HEAD_CENTRE_LINE[1]!;
+  const scale = Math.cos((tip[1] * Math.PI) / 180) * 111320;
+  const dx = (next[0] - tip[0]) * scale;
+  const dy = (next[1] - tip[1]) * 111320;
+  const len = Math.hypot(dx, dy);
+  return [
+    ...HEAD_CENTRE_LINE,
+    [
+      tip[0] + ((-dy / len) * headHalf) / scale,
+      tip[1] + ((dx / len) * headHalf) / 111320,
+    ],
+  ];
+})();
+
+check(
+  // **"The head is not pointed."** The corridor and the centre line were right and the
+  // arrowhead was a stub — a whole-graphic failure at a glance, and not one any check
+  // above could see: those measure control points, and this is what the renderer does
+  // with them. AXIS2 gives point N two jobs, and a point offset square off the tip only
+  // does one of them: the back of the arrowhead ends up level with its own point.
+  //
+  // Measured as the depth of the drawn barbs, against the geometry it replaced.
+  "the drawn arrowhead is pointed, not a stub",
+  (() => {
+    const pointed = arrowheadOf(controlPointsForRule("AXIS2", HEAD_CLICKS));
+    const blunt = arrowheadOf(bluntControl);
+    return (
+      // The head and the corridor are the same width, so a flare far off the half width
+      // would mean this is measuring something else entirely.
+      Math.abs(pointed.flare - headHalf) < headHalf * 0.05 &&
+      pointed.depth > headHalf * 1.2 &&
+      // And the old geometry really is the stub: barbs level with the point.
+      blunt.depth < headHalf * 0.2
+    );
+  })(),
+  (() => {
+    const pointed = arrowheadOf(controlPointsForRule("AXIS2", HEAD_CLICKS));
+    const blunt = arrowheadOf(bluntControl);
+    return {
+      halfWidth: Math.round(headHalf),
+      headDepthNow: Math.round(pointed.depth),
+      headDepthSquareOffTheTip: Math.round(blunt.depth),
+    };
+  })(),
+);
+
 
 check(
   // Everything that is genuinely a path is passed through untouched — reordering an area
@@ -1090,6 +1227,131 @@ check(
   editing.floored === 2,
   { floor: 2, ended: editing.floored },
 );
+
+/* ------------------------------------------------- editing an axis graphic's width */
+
+/** The sample's Main Attack, whichever index it sits at. */
+const mainAttack = (): PlacedGraphic =>
+  useDemoStore.getState().graphics.find((g) => g.name === "Main Attack")!;
+
+/** Its width and head depth in metres, the two magnitudes point N stands for. */
+const mainAttackAxis = (): { along: number; across: number; points: number } => {
+  const graphic = mainAttack();
+  return {
+    ...axisComponentsOf(
+      graphic.points.slice(0, -1),
+      graphic.points[graphic.points.length - 1]!,
+    ),
+    points: graphic.points.length,
+  };
+};
+
+/** Seeded, selected, and cleared again — the editor acts on the selection. */
+const withMainAttack = <T,>(run: () => T): T => {
+  useDemoStore.getState().clearAll();
+  useDemoStore.getState().seedSample();
+  useDemoStore.getState().selectGraphic(mainAttack().id);
+  const result = run();
+  useDemoStore.getState().clearAll();
+  return result;
+};
+
+check(
+  // The gesture map.army has and this did not: drag the yellow handle and the corridor
+  // widens. Driven through the store the way the handle does — a drag is a coordinate.
+  "dragging the width handle changes the width",
+  withMainAttack(() => {
+    const before = mainAttackAxis();
+    const tip = mainAttack().points[0]!;
+    // North of the tip by 0.05°: far wider than the derived default, still inside the
+    // cap for a 17 km first leg.
+    useDemoStore
+      .getState()
+      .moveVertex(mainAttack().points.length - 1, tip[0], tip[1] + 0.05);
+    const after = mainAttackAxis();
+    return (
+      after.across > before.across * 1.4 &&
+      after.points === before.points &&
+      renderGraphic(mainAttack().sidc, mainAttack().points).ok
+    );
+  }),
+  withMainAttack(() => {
+    const before = mainAttackAxis();
+    const tip = mainAttack().points[0]!;
+    useDemoStore
+      .getState()
+      .moveVertex(mainAttack().points.length - 1, tip[0], tip[1] + 0.05);
+    return {
+      halfWidthBefore: Math.round(before.across),
+      halfWidthAfter: Math.round(mainAttackAxis().across),
+    };
+  }),
+);
+
+check(
+  // **A width handle that can destroy the graphic is not an adjustable width.** Dropped
+  // 100 km off the axis, the clamp holds it at the edge of what the renderer draws
+  // rather than letting it discard the centre line.
+  "the width handle cannot be dragged into a collapse",
+  withMainAttack(() => {
+    useDemoStore.getState().moveVertex(mainAttack().points.length - 1, 101.9, 14.9);
+    const points = mainAttack().points;
+    const measured = axisWidthCheck("AXIS2", points);
+    return (
+      measured !== null &&
+      !measured.collapses &&
+      measured.halfWidthMetres <= measured.firstLegMetres * 0.36 &&
+      renderGraphic(mainAttack().sidc, points).ok
+    );
+  }),
+  { note: "held at 35% of leg one" },
+);
+
+check(
+  // The other way it used to break: leg one turns under a drag of the arrowhead, the
+  // width point stays put, and the width becomes whatever the new geometry makes it.
+  // Rebuilding it from the chosen width means the corridor rotates and keeps its shape.
+  "dragging the arrowhead keeps the width it was given",
+  withMainAttack(() => {
+    const before = mainAttackAxis();
+    const tip = mainAttack().points[0]!;
+    useDemoStore.getState().moveVertex(0, tip[0], tip[1] + 0.12);
+    const after = mainAttackAxis();
+    return (
+      Math.abs(after.across - before.across) < before.across * 0.05 &&
+      axisWidthCheck("AXIS2", mainAttack().points)?.collapses === false
+    );
+  }),
+  { note: "the arrowhead swung 13 km north, the corridor width unchanged" },
+);
+
+check(
+  // The width point is not on the path, so neither insert nor remove may touch it: an
+  // inserted point belongs in the centre line, and a deleted width leaves a geometry the
+  // renderer refuses with nothing on screen to say which handle was the mistake.
+  "insert and remove leave the width point alone",
+  withMainAttack(() => {
+    const before = mainAttack().points.length;
+    useDemoStore.getState().insertVertex(100.62, 13.645);
+    const inserted = mainAttack().points;
+    const stillWidth =
+      axisComponentsOf(inserted.slice(0, -1), inserted[inserted.length - 1]!)
+        .across > 0;
+    // A delete click on the last handle is a no-op; one on a centre-line handle is not.
+    useDemoStore.getState().removeVertex(inserted.length - 1);
+    const kept = mainAttack().points.length;
+    useDemoStore.getState().removeVertex(1);
+    return (
+      inserted.length === before + 1 &&
+      stillWidth &&
+      kept === before + 1 &&
+      mainAttack().points.length === before &&
+      renderGraphic(mainAttack().sidc, mainAttack().points).ok
+    );
+  }),
+  { note: "insert lands in the centre line, the width point survives a delete click" },
+);
+
 
 lines.push("");
 lines.push(failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`);

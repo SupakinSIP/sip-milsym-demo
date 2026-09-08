@@ -998,6 +998,12 @@ button.danger {
   color: #5c6b7a;
 }
 
+/* The same yellow as the map handle, so the panel row and the handle are one thing. */
+.vertices__n--width {
+  background: #f5c518;
+  color: #3a2c00;
+}
+
 /* A tactical graphic's own lettering, drawn as a marker because a MapLibre symbol layer
  * would need a glyph source the offline basemap does not have. Literal ink and a white
  * halo for the reason the marker rules give: it is drawn over base-map tiles. */
@@ -1166,6 +1172,19 @@ button.danger {
 
 .vhandle:active {
   cursor: grabbing;
+}
+
+/**
+ * The width handle, yellow because it is not a vertex.
+ *
+ * map.army's own colour for it, and the distinction is the point: the orange handles move
+ * the shape and this one changes a magnitude. Yellow on a dark outline rather than yellow
+ * alone, because a yellow dot on a pale basemap is the one handle colour that can vanish.
+ */
+.vhandle--width {
+  background: #f5c518;
+  border-color: #7a5c00;
+  color: #3a2c00;
 }
 
 /* Remove mode: the handle is a target, not something to drag, and it says so. */

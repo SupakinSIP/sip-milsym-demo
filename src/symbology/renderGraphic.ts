@@ -309,36 +309,234 @@ export function axisHalfWidthMetres(
 }
 
 /**
- * Point N: offset from the tip, perpendicular to the first leg.
+ * How deep the arrowhead is, and why a perpendicular offset is not enough.
  *
- * Offset from the **tip** and not from a point back along the axis, because that is the
- * geometry the sample laydown and the stray measurement were taken against — the drawn
- * centre line hugs the clicked path to within a half width when point N sits square off
- * point 1. The perpendicular is taken in local metres with longitude scaled by the
- * latitude, then converted back, so the offset is the same distance on the ground at any
- * longitude rather than the same number of degrees.
+ * `AXIS2` gives point N **two jobs**: "Point N defines the back of the arrowhead … and
+ * Point N determines the width." The width is its perpendicular distance to leg one; the
+ * back of the arrowhead is where it sits *along* the axis. So a point offset square off
+ * the tip — which is what the first version of this derivation did, and what the sample
+ * laydown had always used — asks for an arrowhead whose back is level with its own point,
+ * and the renderer draws exactly that: a blunt stub of a head on an otherwise correct
+ * corridor.
+ *
+ * Setting point N back along the axis gives the head its depth, and the drawn barbs flare
+ * wider than the corridor and meet at point 1. Measured against the renderer at 0, 0.5,
+ * 1, 2 and 3 half widths of setback: 0 is the blunt notch, and from about 1.5 the head
+ * reads as an arrow at a glance. That is the default here.
+ *
+ * Capped at half of leg one so the back of the head cannot be set back past the next
+ * point of the centre line — on a dog-leg whose first leg is short, an uncapped 1.5 half
+ * widths would put the arrowhead's back behind the bend it is supposed to start after.
+ */
+const AXIS_HEAD_OF_WIDTH = 1.5;
+const AXIS_HEAD_LEG_CAP = 0.5;
+
+export function axisHeadDepthMetres(
+  centreLine: readonly (readonly [number, number])[],
+): number {
+  if (centreLine.length < 2) {
+    return 0;
+  }
+  const firstLeg = distanceMetres(centreLine[0]!, centreLine[1]!);
+  return Math.min(
+    axisHalfWidthMetres(centreLine) * AXIS_HEAD_OF_WIDTH,
+    firstLeg * AXIS_HEAD_LEG_CAP,
+  );
+}
+
+/**
+ * Point N: set back along the axis from the tip, and offset perpendicular to it.
+ *
+ * Two components, one per job the rule gives this point — `axisHeadDepthMetres` along the
+ * axis for the back of the arrowhead, `axisHalfWidthMetres` across it for the width. The
+ * along-axis component does not enter the renderer's collapse test, which takes the
+ * *perpendicular* distance to leg one, so giving the head its depth cannot cost the
+ * guarantee the width cap buys.
+ *
+ * Worked in local metres with longitude scaled by the latitude and converted back, so
+ * both offsets are the same distance on the ground at any longitude rather than the same
+ * number of degrees.
  */
 export function axisWidthPoint(
   centreLine: readonly (readonly [number, number])[],
 ): [number, number] {
+  return axisWidthPointFrom(
+    centreLine,
+    axisHalfWidthMetres(centreLine),
+    axisHeadDepthMetres(centreLine),
+    // The default side. Which side is arbitrary — the renderer takes the perpendicular
+    // *distance* — so it is fixed rather than chosen, and dragging the handle across the
+    // centre line does not change the drawn shape.
+    1,
+  );
+}
+
+/**
+ * Point N from magnitudes rather than defaults, which is what makes the width adjustable.
+ *
+ * The editor's half of the derivation: the operator drags the width handle, the drag is
+ * resolved into these two magnitudes and clamped, and the point is rebuilt from them.
+ * Rebuilt rather than moved, so it stays *on* the perpendicular of leg one — the quantity
+ * the rule and the renderer's collapse test both read — instead of drifting off it as a
+ * free 2D drag would.
+ */
+export function axisWidthPointFrom(
+  centreLine: readonly (readonly [number, number])[],
+  halfWidthMetres: number,
+  headDepthMetres: number,
+  side: 1 | -1,
+): [number, number] {
   const tip = centreLine[0]!;
   const next = centreLine[1] ?? centreLine[0]!;
-  const halfWidth = axisHalfWidthMetres(centreLine);
   const scale = Math.cos((tip[1] * Math.PI) / 180) * METRES_PER_DEGREE;
   const dx = (next[0] - tip[0]) * scale;
   const dy = (next[1] - tip[1]) * METRES_PER_DEGREE;
   const length = Math.hypot(dx, dy);
-  if (length === 0 || halfWidth === 0) {
+  if (length === 0 || halfWidthMetres === 0) {
     return [tip[0], tip[1]];
   }
-  // Left of the tip→rear direction. Which side is arbitrary — the renderer takes the
-  // perpendicular *distance* — so it is fixed rather than chosen, and the handle can be
-  // dragged to the other side without changing the drawn shape.
-  const px = -dy / length;
-  const py = dx / length;
+  const ux = dx / length;
+  const uy = dy / length;
+  const across = halfWidthMetres * side;
   return [
-    tip[0] + (px * halfWidth) / scale,
-    tip[1] + (py * halfWidth) / METRES_PER_DEGREE,
+    tip[0] + (ux * headDepthMetres - uy * across) / scale,
+    tip[1] + (uy * headDepthMetres + ux * across) / METRES_PER_DEGREE,
+  ];
+}
+
+/* ------------------------------------------------- editing an axis graphic */
+
+/**
+ * A point resolved into the axis's own frame: back along the centre line, and across it.
+ *
+ * The frame every axis quantity is stated in — the width is `across`, the arrowhead's
+ * depth is `along`, and the renderer's collapse test compares `across` with leg one.
+ * Stating it once means the editor, the panel and the checks all measure the same thing.
+ */
+export interface AxisComponents {
+  /** Metres back from the tip along leg one. Negative is out in front of the arrowhead. */
+  along: number;
+  /** Metres from the centre line — the half width. Always positive. */
+  across: number;
+  /** Which side of the centre line the point is on. */
+  side: 1 | -1;
+}
+
+export function axisComponentsOf(
+  centreLine: readonly (readonly [number, number])[],
+  point: readonly [number, number],
+): AxisComponents {
+  const tip = centreLine[0]!;
+  const next = centreLine[1] ?? centreLine[0]!;
+  const scale = Math.cos((tip[1] * Math.PI) / 180) * METRES_PER_DEGREE;
+  const legX = (next[0] - tip[0]) * scale;
+  const legY = (next[1] - tip[1]) * METRES_PER_DEGREE;
+  const length = Math.hypot(legX, legY);
+  if (length === 0) {
+    return { along: 0, across: 0, side: 1 };
+  }
+  const ux = legX / length;
+  const uy = legY / length;
+  const offX = (point[0] - tip[0]) * scale;
+  const offY = (point[1] - tip[1]) * METRES_PER_DEGREE;
+  const across = offX * -uy + offY * ux;
+  return {
+    along: offX * ux + offY * uy,
+    across: Math.abs(across),
+    side: across < 0 ? -1 : 1,
+  };
+}
+
+/**
+ * The operator's drag, held inside what the renderer will actually draw.
+ *
+ * **A width handle that can destroy the graphic is not an adjustable width.** Drag point
+ * N far enough out and its perpendicular distance passes leg one, at which point
+ * `clsUtility.FilterAXADPoints` discards the centre line and draws a stub — the failure
+ * the derivation was built to make impossible, handed back to the operator through the
+ * editor. So the drag is clamped rather than refused: the handle follows the pointer to
+ * the edge of what draws and then stops, which is a shape that stays legible under a
+ * fast drag and needs no error to explain itself.
+ *
+ * - **across** — the half width — stops at the same 35% of leg one the default uses.
+ * - **along** — the arrowhead's depth — stops at 50% of leg one, and cannot go below half
+ *   the half width, because a head shallower than that is the blunt stub again.
+ */
+export function axisClampedComponents(
+  centreLine: readonly (readonly [number, number])[],
+  components: AxisComponents,
+): AxisComponents {
+  const firstLeg =
+    centreLine.length >= 2
+      ? distanceMetres(centreLine[0]!, centreLine[1]!)
+      : 0;
+  const across = Math.min(components.across, firstLeg * AXIS_WIDTH_LEG_CAP);
+  const along = Math.min(
+    Math.max(components.along, across * AXIS_HEAD_FLOOR_OF_WIDTH),
+    firstLeg * AXIS_HEAD_LEG_CAP,
+  );
+  return { along, across, side: components.side };
+}
+
+const AXIS_HEAD_FLOOR_OF_WIDTH = 0.5;
+
+/**
+ * Where the width handle lands when it is dragged to `at`.
+ *
+ * Returns the whole point array so the caller does not have to know that point N is the
+ * last one — the rule's convention stays inside this module, which is the same reason
+ * `controlPointsForRule` exists.
+ */
+export function axisPointsWithWidthAt(
+  points: readonly (readonly [number, number])[],
+  at: readonly [number, number],
+): [number, number][] {
+  const centreLine = points.slice(0, -1);
+  if (centreLine.length < 2) {
+    return points.map(([lng, lat]) => [lng, lat]);
+  }
+  const clamped = axisClampedComponents(
+    centreLine,
+    axisComponentsOf(centreLine, at),
+  );
+  return [
+    ...centreLine.map(([lng, lat]) => [lng, lat] as [number, number]),
+    axisWidthPointFrom(centreLine, clamped.across, clamped.along, clamped.side),
+  ];
+}
+
+/**
+ * Point N rebuilt after the **centre line** moved, keeping the width the operator chose.
+ *
+ * Dragging the arrowhead is the case that makes this necessary: leg one changes direction,
+ * and a width point left where it was is no longer perpendicular to anything in
+ * particular — its half width becomes whatever the new geometry happens to make it, which
+ * is how a shape that was fine collapses on a drag that should only have rotated it.
+ *
+ * So the width and head depth are read off the geometry **as it was before the edit** and
+ * the point is rebuilt from those magnitudes against the new centre line, clamped in case
+ * the new leg one is shorter than the old width allowed for. Both arrays are needed for
+ * that reason: measuring the old width against the new centre line is the stale reading
+ * this function exists to avoid. Insert and remove come through here too, since both can
+ * change which points leg one runs between.
+ */
+export function axisPointsAfterCentreLineEdit(
+  before: readonly (readonly [number, number])[],
+  after: readonly (readonly [number, number])[],
+): [number, number][] {
+  const centreLine = after.slice(0, -1);
+  const wasCentreLine = before.slice(0, -1);
+  if (centreLine.length < 2 || wasCentreLine.length < 2) {
+    return after.map(([lng, lat]) => [lng, lat]);
+  }
+  const previous = axisComponentsOf(
+    wasCentreLine,
+    before[before.length - 1]!,
+  );
+  const clamped = axisClampedComponents(centreLine, previous);
+  return [
+    ...centreLine.map(([lng, lat]) => [lng, lat] as [number, number]),
+    axisWidthPointFrom(centreLine, clamped.across, clamped.along, clamped.side),
   ];
 }
 

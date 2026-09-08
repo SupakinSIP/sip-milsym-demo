@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { Map as MlMap, Marker } from "maplibre-gl";
 import maplibregl from "maplibre-gl";
-import { useDemoStore } from "../state/useDemoStore.js";
+import { selectedHasWidthPoint, useDemoStore } from "../state/useDemoStore.js";
 
 /**
  * Draggable handles on the vertices of the selected shape.
@@ -76,6 +76,17 @@ export function useVertexHandles(map: MlMap | null, ready: boolean): void {
         handles.pop()?.marker.remove();
       }
 
+      // map.army colours its width handle differently from its vertices, and the reason
+      // is not decoration: the two do different things. Its vertices move the shape; the
+      // one handle that is yellow **changes a magnitude**, and dragging it as though it
+      // were a vertex is how an operator discovers that a graphic can be destroyed by
+      // adjusting it. So the last handle of an axis graphic is yellow and lettered `W`,
+      // and the store rebuilds it on the perpendicular rather than dropping it where the
+      // pointer let go.
+      const widthHandle = selectedHasWidthPoint(useDemoStore.getState())
+        ? wanted.length - 1
+        : -1;
+
       wanted.forEach((point, index) => {
         let handle = handles[index];
         if (!handle) {
@@ -112,9 +123,20 @@ export function useVertexHandles(map: MlMap | null, ready: boolean): void {
         handle.marker.setLngLat(point);
         // Dragging is off in remove mode, or a click that lands a pixel off registers as
         // a tiny drag and the vertex moves instead of disappearing.
-        handle.marker.setDraggable(mode !== "remove");
-        handle.element.classList.toggle("vhandle--remove", mode === "remove");
-        handle.element.textContent = String(index + 1);
+        // The width point is not removable, so remove mode leaves it draggable: a
+        // handle that greys out for a mode it is exempt from reads as broken, and one
+        // that accepts the click and does nothing reads as a missed hit.
+        const isWidth = index === widthHandle;
+        handle.marker.setDraggable(mode !== "remove" || isWidth);
+        handle.element.classList.toggle(
+          "vhandle--remove",
+          mode === "remove" && !isWidth,
+        );
+        handle.element.classList.toggle("vhandle--width", isWidth);
+        handle.element.textContent = isWidth ? "W" : String(index + 1);
+        handle.element.title = isWidth
+          ? "The width control point — drag it out from the arrowhead to widen the corridor"
+          : `Point ${index + 1}`;
       });
     };
 

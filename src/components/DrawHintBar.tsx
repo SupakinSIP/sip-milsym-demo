@@ -190,10 +190,10 @@ export function DrawHintBar(): React.JSX.Element | null {
         </p>
       ) : derivedHalfWidth !== null && derivedHalfWidth > 0 ? (
         <p className="drawhint__anchors">
-          Width is the tool's, not yours: the corridor comes out{" "}
-          <strong>{(Math.round(derivedHalfWidth * 2) / 1000).toFixed(1)} km</strong> across,
-          derived perpendicular to the arrowhead and capped against the first leg. It lands
-          as the last numbered handle, so drag it after placing to change it.
+          Width and arrowhead are the tool's, not yours: the corridor comes out{" "}
+          <strong>{(Math.round(derivedHalfWidth * 2) / 1000).toFixed(1)} km</strong> across
+          with a head <strong>1.5 half widths</strong> deep — point N carries both, and it
+          lands as the last numbered handle, so drag it after placing to change either.
         </p>
       ) : null}
       {rule && rule.anchorPoints !== "" ? (

@@ -4,6 +4,7 @@ import {
   AMPLIFIER_MAX_CHARS_HARD,
   amplifierLetterOf,
   amplifierNameOf,
+  axisComponentsOf,
   basicIdOf,
   fieldsOf,
   modifiersOf,
@@ -36,6 +37,17 @@ export function GraphicPanel({
 }: {
   graphic: PlacedGraphic;
 }): React.JSX.Element {
+  // The rule's own convention, read off the placed shape: for the axis rules the last
+  // control point is a width rather than a vertex, and the panel says so rather than
+  // listing four coordinates as though they were four corners of a path.
+  const widthPoint =
+    graphic.drawRuleName.startsWith("AXIS") && graphic.points.length >= 3;
+  const axis = widthPoint
+    ? axisComponentsOf(
+        graphic.points.slice(0, -1),
+        graphic.points[graphic.points.length - 1]!,
+      )
+    : null;
   const updateGraphicAmplifier = useDemoStore((s) => s.updateGraphicAmplifier);
   const deleteGraphic = useDemoStore((s) => s.deleteGraphic);
   const selectGraphic = useDemoStore((s) => s.selectGraphic);
@@ -105,15 +117,36 @@ export function GraphicPanel({
         <span className="panel__count">{graphic.points.length}</span>
       </header>
       <ol className="vertices">
-        {graphic.points.map(([lng, lat], index) => (
+        {graphic.points.map(([lng, lat], index) => {
           // Index as key: these are coordinates, two of them can legitimately be equal,
           // and the list is never reordered — only appended to while drawing.
-          <li key={index}>
-            <span className="vertices__n">{index + 1}</span>
-            {lat.toFixed(5)}, {lng.toFixed(5)}
-          </li>
-        ))}
+          const isWidth = widthPoint && index === graphic.points.length - 1;
+          return (
+            <li key={index}>
+              <span
+                className={
+                  isWidth ? "vertices__n vertices__n--width" : "vertices__n"
+                }
+              >
+                {isWidth ? "W" : index + 1}
+              </span>
+              {lat.toFixed(5)}, {lng.toFixed(5)}
+            </li>
+          );
+        })}
       </ol>
+      {widthPoint && axis ? (
+        // The two magnitudes point N stands for, in metres, because that is what the
+        // operator is actually adjusting when they drag it — a pair of coordinates is
+        // the wrong unit for a width and tells them nothing about what dragging it did.
+        <p className="hint">
+          Point <strong>W</strong> is the rule's width control point, not a vertex:{" "}
+          <strong>{(Math.round(axis.across * 2) / 1000).toFixed(1)} km</strong> of corridor
+          width and an arrowhead <strong>{Math.round(axis.along).toLocaleString()} m</strong>{" "}
+          deep. Drag the yellow handle to change them — it stays on the perpendicular of
+          the first leg, where <code>{graphic.drawRuleName}</code> reads it from.
+        </p>
+      ) : null}
 
       <header className="panel__head panel__head--sub">
         <h3>Modifiers</h3>

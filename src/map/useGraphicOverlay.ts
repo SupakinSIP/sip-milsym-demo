@@ -55,6 +55,18 @@ const SOURCE = "graphics";
 const FILL = "graphics-fill";
 const LINE = "graphics-line";
 const LINE_DASHED = "graphics-line-dashed";
+/**
+ * The click target, which is not the same thing as the picture.
+ *
+ * A tactical graphic's strokes are 2–3 px wide, and MapLibre hit-tests a line at the
+ * width it is painted — so selecting a placed graphic meant landing a click inside three
+ * pixels, and "click the graphic to edit it" was true in the code and false at the mouse.
+ * This layer is the same geometry painted 16 px wide and fully transparent: it takes the
+ * click, the visible layers keep their stroke widths, and nothing about the drawing
+ * changes. Areas already have their fill to click, and a fill is a large target; it is
+ * lines that were unclickable.
+ */
+const LINE_HIT = "graphic-line-hit";
 const VERTICES = "graphics-vertices";
 
 /** The in-progress shape, so the operator can see what they have clicked so far. */
@@ -132,6 +144,22 @@ export function useGraphicOverlay(map: MlMap | null, ready: boolean): void {
         ["get", "strokeWidth"],
         2,
       ] as unknown as maplibregl.ExpressionSpecification;
+      if (!map.getLayer(LINE_HIT)) {
+        map.addLayer({
+          id: LINE_HIT,
+          type: "line",
+          source: SOURCE,
+          // Not the preview of the shape being drawn: a click there is another point,
+          // and a pointer cursor over it would advertise a selection that cannot happen.
+          filter: ["!=", ["get", "graphicId"], "draft"],
+          paint: {
+            // Transparent, not invisible: `visibility: none` would take it out of
+            // hit-testing too, and a zero opacity line is still queried.
+            "line-opacity": 0,
+            "line-width": 16,
+          },
+        });
+      }
       if (!map.getLayer(LINE)) {
         map.addLayer({
           id: LINE,
@@ -403,6 +431,15 @@ export function useGraphicOverlay(map: MlMap | null, ready: boolean): void {
       } as never);
     };
 
+    const onEnterGraphic = (): void => {
+      // A pointer cursor over a placed graphic, because "you can click this" is not
+      // discoverable from a line on a map otherwise.
+      map.getCanvas().style.cursor = "pointer";
+    };
+    const onLeaveGraphic = (): void => {
+      map.getCanvas().style.cursor = "";
+    };
+
     const onClickGraphic = (event: maplibregl.MapLayerMouseEvent): void => {
       const id = event.features?.[0]?.properties?.["graphicId"];
       // "draft" is the preview of the shape being drawn, and it is not selectable: a
@@ -427,8 +464,16 @@ export function useGraphicOverlay(map: MlMap | null, ready: boolean): void {
     }
     map.on("styledata", onStyle);
     map.on("click", FILL, onClickGraphic);
+    // The hit layer first, and the painted ones after it: a click that lands on both is
+    // handled once — `onClickGraphic` stops propagation — and either way it is the same
+    // graphic id under the pointer.
+    map.on("click", LINE_HIT, onClickGraphic);
     map.on("click", LINE, onClickGraphic);
     map.on("click", LINE_DASHED, onClickGraphic);
+    map.on("mouseenter", LINE_HIT, onEnterGraphic);
+    map.on("mouseleave", LINE_HIT, onLeaveGraphic);
+    map.on("mouseenter", FILL, onEnterGraphic);
+    map.on("mouseleave", FILL, onLeaveGraphic);
 
     const unsubscribe = useDemoStore.subscribe(sync);
 
@@ -436,8 +481,13 @@ export function useGraphicOverlay(map: MlMap | null, ready: boolean): void {
       unsubscribe();
       map.off("styledata", onStyle);
       map.off("click", FILL, onClickGraphic);
+      map.off("click", LINE_HIT, onClickGraphic);
       map.off("click", LINE, onClickGraphic);
       map.off("click", LINE_DASHED, onClickGraphic);
+      map.off("mouseenter", LINE_HIT, onEnterGraphic);
+      map.off("mouseleave", LINE_HIT, onLeaveGraphic);
+      map.off("mouseenter", FILL, onEnterGraphic);
+      map.off("mouseleave", FILL, onLeaveGraphic);
       for (const held of labels.values()) {
         held.marker.remove();
       }
@@ -445,6 +495,7 @@ export function useGraphicOverlay(map: MlMap | null, ready: boolean): void {
       // Layers before sources, or MapLibre refuses to remove a source still in use.
       for (const layer of [
         FILL,
+        LINE_HIT,
         LINE,
         LINE_DASHED,
         DRAFT_LINE,

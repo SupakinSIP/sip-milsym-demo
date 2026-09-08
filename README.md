@@ -13,7 +13,7 @@ the coverage claims can be checked by hand: search for a symbol, place it, lette
 ```bash
 npm install
 npm run dev            # http://localhost:5173  (add ?rail=coverage for the comparison)
-npm run smoke          # 61 checks in a headless browser (dev server must be up)
+npm run smoke          # 66 checks in a headless browser (dev server must be up)
 ```
 
 ![The coverage comparison](coverage.png)
@@ -247,10 +247,17 @@ first time. That was the real gap.
 
 ![The point editor: numbered handles, and the toolbar acting on the selection](editor.png)
 
+- **Clicking the graphic selects it**, and the click target is not the picture: a
+  tactical graphic's strokes are 2–3 px and MapLibre hit-tests a line at the width it is
+  painted, so "click the shape to edit it" was true in the code and false at the mouse.
+  A transparent 16 px line layer over the same geometry takes the click, and the pointer
+  turns to a hand over anything selectable.
 - **Numbered handles** on the selected shape, orange because that is the one hue neither
   the standard's palette nor the sketch palette uses — a handle is never mistaken for part
   of a symbol. They are `maplibregl.Marker`s rather than a circle layer, because a layer
   has no per-feature drag.
+- **The width handle is yellow and lettered `W`**, map.army's own colour for it, because
+  it is not a vertex — see *The width is a handle, not a number* below.
 - **Move** is the resting state: handles drag, and a click on the map still places marks.
 - **Add point** inserts into the **segment nearest the click**, not at the end. Appending
   would make an add-point tool into an extend-line tool, and on a closed area it would put
@@ -502,18 +509,41 @@ gesture is now:
 
 - the operator clicks the **axis only**, rear → arrowhead, two clicks or more;
 - `controlPointsForRule` reverses that into the tip-first centre line the rule wants;
-- and it **derives point N itself** — perpendicular to the first leg, offset from the tip,
-  at 10% of the axis's own length, **capped at 35% of leg one**.
+- and it **derives point N itself**, from the axis it was given.
 
-That cap is the whole safety argument: the renderer's collapse test compares the half
-width against leg one, so a width that can never exceed a third of it can never trip the
-test. Not safe in the cases that were tried — safe by construction.
+That cap on the width is the safety argument: the renderer's collapse test compares the
+half width against leg one, so a width that can never exceed a third of it can never trip
+the test. Not safe in the cases that were tried — safe by construction.
+
+#### Point N has two jobs, and the first version only did one
+
+> "Point N defines the **back of the arrowhead** … and Point N determines the **width**."
+
+The width is point N's *perpendicular* distance to leg one. The back of the arrowhead is
+where it sits *along* the axis. So a point offset square off the tip — which is what the
+first version of this derivation did, and what the sample laydown had used all along —
+asks for an arrowhead whose back is level with its own point, and the renderer draws
+exactly that: a correct corridor with a **blunt stub** for a head. Measured on the drawn
+geometry, that head is **0 m deep**.
+
+Both components are therefore derived, in the axis's own frame:
+
+| component | value | capped at |
+| --- | --- | --- |
+| across the axis — the **width** | 10% of the axis's length | 35% of leg one |
+| along the axis — the **head depth** | 1.5 × the half width | 50% of leg one |
+
+1.5 is measured rather than chosen: rendered at 0, 0.5, 1, 2 and 3 half widths of setback,
+0 is the stub and the head reads as an arrow from about 1.5. The along-axis component does
+not enter the collapse test — that takes the perpendicular distance — so giving the head
+its depth costs nothing the width cap bought. The second cap keeps the head's back from
+being set back past the bend on a dog-leg whose first leg is short.
 
 | | before | now |
 | --- | --- | --- |
 | clicks for Main Attack | 4, the last one a width | **2+, all on the axis** |
-| the width | the operator's, and blind | the tool's, then draggable |
-| collapsed into a wedge | whenever the width click was generous | **cannot** |
+| the width | the operator's, and blind | the tool's, then a yellow handle |
+| collapsed into a wedge | whenever the width click was generous | **cannot**, drawing or editing |
 | tile reads | `3+ pts · AXIS2` (control points) | `2+ pts · AXIS2` (clicks) |
 
 The derived point is a **real control point at index N** of the stored geometry, so it is
@@ -528,13 +558,65 @@ for everything else — and the tile, the hint bar's *point N of M* and the comm
 all read it, because a tool that asks for a click it will then ignore is worse than one
 that asks for the wrong number of clicks.
 
-Five checks: three clicks in gives four control points out with the path reversed and
+Six checks. Three clicks in gives four control points out with the path reversed and
 nothing else moved; **two clicks draw the arrow** and the rear click sits on the drawn
-centre line within a half width (1,839 m against a 3,700 m half width); an axis rule's
+centre line within a half width (1,839 m against a 3,680 m half width); an axis rule's
 click budget is one short of its control points while `AREA1` passes through; the derived
 width does not trip the collapse condition for four shapes of axis — including a dog-leg
-whose final leg is metres long, which is the case that used to fail; and the derived offset
-is square off the arrowhead, checked as a dot product rather than by eye.
+whose final leg is metres long, which is the case that used to fail; the derived point
+resolves into exactly the intended width across the axis and head depth along it.
+
+And the one that catches what none of those could — they all measure **control points**,
+and a blunt arrowhead is what the renderer *did* with them. So the last check measures the
+drawn barbs in the axis's own frame, against the geometry it replaced:
+
+| | half width | drawn head depth |
+| --- | --- | --- |
+| square off the tip (before) | 3,680 m | **0 m** |
+| set back along the axis (now) | 3,680 m | **5,511 m** |
+
+### The width is a handle, not a number
+
+map.army's axis graphic carries **one handle of a different colour**, out at the arrowhead,
+and it adjusts the width. That is the other half of owning the gesture: a default the tool
+chose is only acceptable if the operator can change it, and the place to change it is on
+the map rather than in a field.
+
+The derived point N *was* already one of the numbered handles, so it could already be
+dragged — and that turned out to be worse than useless, because three separate things were
+wrong with dragging it:
+
+| the drag | what happened | what happens now |
+| --- | --- | --- |
+| the width handle, out sideways | free 2D move: point N drifts off the perpendicular of leg one, so it means whatever the new geometry makes it | rebuilt **on** the perpendicular from the drag's own two components |
+| the width handle, far out | past 35% of leg one the renderer discards the centre line — **the fan of wedges, back again, from the editor** | clamped at the edge of what draws, so the handle stops and the graphic holds |
+| the **arrowhead**, swung round | leg one turns, the width point stays put, and the width silently becomes something else | point N rebuilt from the width already chosen, so the corridor rotates and keeps its shape |
+
+The last one is the one worth dwelling on: it is not a width bug at all. Every edit to the
+centre line changes leg one, which is the line the width is measured from — so insert and
+remove go through the same rebuild. The magnitudes are read off the geometry **as it was
+before the edit** and re-applied after it, because measuring the old width against the new
+centre line is the stale reading the whole thing exists to avoid.
+
+Two more consequences of point N not being a vertex:
+
+- **Add point** searches only the centre line for its nearest segment. The line from the
+  rear of the axis to the width point is not drawn along anything, and it is usually the
+  segment nearest a click — inserting into it would put a bend where the operator did not
+  point and shift which point is the width.
+- **Remove point** refuses the width handle, silently, and the toolbar's floor is three
+  rather than two. A deleted width leaves a geometry the renderer refuses with nothing on
+  screen to say which of the handles was the mistake.
+
+The panel states the two magnitudes in metres — *7.5 km of corridor width and an arrowhead
+5,640 m deep* — because a pair of coordinates is the wrong unit for a width and says
+nothing about what dragging the handle just did.
+
+Four checks, driven through the store the way the handle drives it: dragging the width
+handle widens the corridor (3,760 m → 5,465 m of half width) and the graphic still draws;
+dropped 100 km off the axis it is held at 35% of leg one and does not collapse; the
+arrowhead swung 13 km north keeps the width within 5%; and insert lands in the centre line
+while a delete click on `W` is a no-op.
 
 ### The scale was hardcoded, and decorated lines paid for it
 
@@ -828,7 +910,7 @@ src/
     useDemoStore.ts  marks, selection, draft. In memory; a reload loses them, on purpose
   components/        the browser, the gallery, the coverage report, the panel, the map
 scripts/
-  smoke-browser.ts   the 61 checks
+  smoke-browser.ts   the 66 checks
   smoke.mjs          the driver
   gen-map-army-fixture.mjs  rebuilds the fixture from a sip-map-army checkout
   gen-draw-rules.mjs        extracts the 89 anchor-point rules from the library

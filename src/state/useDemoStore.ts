@@ -9,7 +9,11 @@ import {
   type Amplifiers,
   type SidcFields,
 } from "../symbology/index.js";
-import { controlPointsForRule } from "../symbology/renderGraphic.js";
+import {
+  axisPointsAfterCentreLineEdit,
+  axisPointsWithWidthAt,
+  controlPointsForRule,
+} from "../symbology/renderGraphic.js";
 import { sketchKindOf } from "../sketch/kinds.js";
 
 /**
@@ -54,8 +58,26 @@ export interface PlacedGraphic {
   sidc: string;
   /** The entity's name, kept for the list and the labels. */
   name: string;
-  /** `[lng, lat]`, in the order they were clicked. */
+  /**
+   * `[lng, lat]`, in the standard's **control point** order for this graphic's rule.
+   *
+   * Not the clicked order: `controlPointsForRule` translates on the way in, so what is
+   * stored is what the renderer is given. For an axis graphic that means the arrowhead is
+   * point 1 and the last point is the width — which is why the rule is on the record.
+   */
   points: [number, number][];
+  /**
+   * The standard's anchor point rule, carried on the placed shape and not only on the
+   * draft.
+   *
+   * The editor needs it. Every rule's points are a path to move around **except** the
+   * ones whose last point is a width control point, and an editor that cannot tell the
+   * difference either treats a width as a vertex — free 2D drag, a graphic that collapses
+   * on a drag that should have rotated it — or treats every vertex as a width. Looking
+   * the rule back up from the SIDC would work and would put a catalog dependency in the
+   * editor for a string that was in hand when the shape was committed.
+   */
+  drawRuleName: string;
   amplifiers: Amplifiers;
 }
 
@@ -378,7 +400,9 @@ const SAMPLE_GRAPHICS: readonly {
     // under the length of the first leg or `clsUtility.FilterAXADPoints` throws the whole
     // centre line away and extends a stub along leg one instead — which is what the
     // derivation's cap against leg one exists to make impossible. Here leg one is about
-    // 17 km and the derived half width about 4 km.
+    // 17 km, the derived half width about 4 km, and the arrowhead 1.5 half widths deep —
+    // point N carries both, and offsetting it square off the tip (which is what this
+    // sample used to do) is what drew the head as a blunt stub.
     basicId: "25151403",
     name: "Main Attack",
     // Clicked order: rear, mid, arrowhead. No width click — see controlPointsForRule.
@@ -517,6 +541,26 @@ function editPoints(
 }
 
 /**
+ * The selected shape's last point is a **width control point**, not a vertex.
+ *
+ * True only for the axis rules, and it is the one thing the editor has to know about
+ * symbology: their point N is a magnitude in disguise. Everything else — every `AREA*`,
+ * every `LINE*`, every sketch — is a path whose points are all the same kind of thing,
+ * and for those this returns false and the editor stays the plain point editor it was.
+ */
+export function selectedHasWidthPoint(state: DemoState): boolean {
+  if (state.selectedSketchId || !state.selectedGraphicId) {
+    return false;
+  }
+  const graphic = state.graphics.find((g) => g.id === state.selectedGraphicId);
+  return (
+    graphic !== undefined &&
+    graphic.drawRuleName.startsWith("AXIS") &&
+    graphic.points.length >= 3
+  );
+}
+
+/**
  * How few points the selected shape can be reduced to and still draw.
  *
  * For a sketch it is the palette row's own minimum. For a conformant graphic it is two,
@@ -531,7 +575,11 @@ function minimumPointsFor(state: DemoState): number {
     const sketch = state.sketches.find((s) => s.id === state.selectedSketchId);
     return sketchKindOf(sketch?.kindId ?? "")?.minPoints ?? 2;
   }
-  return 2;
+  // An axis graphic's floor is a real one rather than the generic two: two centre-line
+  // points and the width. Understating it here would let the editor take the centre line
+  // down to a single point, and a "line" of one point plus a width is not a graphic the
+  // renderer can draw or the operator can get back from.
+  return selectedHasWidthPoint(state) ? 3 : 2;
 }
 
 /**
@@ -751,6 +799,7 @@ export const useDemoStore = create<DemoState>((set, get) => ({
               points: controlPointsForRule(drawing.drawRuleName, points).map(
                 ([lng, lat]) => [lng, lat] as [number, number],
               ),
+              drawRuleName: drawing.drawRuleName,
               amplifiers: {},
             },
           ],
@@ -781,6 +830,7 @@ export const useDemoStore = create<DemoState>((set, get) => ({
             points: controlPointsForRule(drawing.drawRuleName, drawing.points).map(
               ([lng, lat]) => [lng, lat] as [number, number],
             ),
+            drawRuleName: drawing.drawRuleName,
             amplifiers: {},
           },
         ],
@@ -894,29 +944,65 @@ export const useDemoStore = create<DemoState>((set, get) => ({
   setEditMode: (editMode) => set({ editMode }),
 
   moveVertex: (index, lng, lat) =>
-    set((state) => editPoints(state, (points) =>
-      points.map((point, i) =>
-        i === index ? ([lng, lat] as [number, number]) : point,
-      ),
-    )),
+    set((state) => {
+      const widthPoint = selectedHasWidthPoint(state);
+      return editPoints(state, (points) => {
+        const moved = points.map((point, i) =>
+          i === index ? ([lng, lat] as [number, number]) : point,
+        );
+        if (!widthPoint) {
+          return moved;
+        }
+        // Two different gestures wearing the same drag.
+        //
+        // The **width handle** does not move to where it was dropped: it is rebuilt on
+        // the perpendicular of leg one from the clamped magnitudes of the drag, because
+        // that is the only place the rule gives it any meaning and the only place the
+        // renderer will read it from.
+        //
+        // A **centre-line** point does move where it was dropped, and then the width
+        // point is rebuilt from the width the operator already chose — otherwise
+        // dragging the arrowhead round changes the width as a side effect, and far
+        // enough round it collapses the graphic.
+        return index === points.length - 1
+          ? axisPointsWithWidthAt(points, [lng, lat])
+          : axisPointsAfterCentreLineEdit(points, moved);
+      });
+    }),
 
   insertVertex: (lng, lat) =>
-    set((state) =>
-      editPoints(state, (points) => {
+    set((state) => {
+      const widthPoint = selectedHasWidthPoint(state);
+      return editPoints(state, (points) => {
         if (points.length < 2) {
           return [...points, [lng, lat]];
         }
-        const at = nearestSegment(points, [lng, lat]);
+        // On an axis graphic the width point is not on the path, so the segment search
+        // has to stop before it: the "segment" from the rear of the axis to the width
+        // point is a line nothing is drawn along, and it is usually the one nearest the
+        // click. Inserting into it would put a bend in the centre line at a place the
+        // operator did not point at, and shift which point is the width.
+        const path = widthPoint ? points.slice(0, -1) : points;
+        const at = nearestSegment(path, [lng, lat]);
         const next = [...points];
         next.splice(at + 1, 0, [lng, lat]);
-        return next;
-      }),
-    ),
+        return widthPoint ? axisPointsAfterCentreLineEdit(points, next) : next;
+      });
+    }),
 
   removeVertex: (index) =>
-    set((state) =>
-      editPoints(state, (points) => {
+    set((state) => {
+      const widthPoint = selectedHasWidthPoint(state);
+      return editPoints(state, (points) => {
         const floor = minimumPointsFor(state);
+        // The width point is not removable: the rule requires it, and a click that
+        // deleted it would leave a centre line the renderer refuses — with nothing on
+        // screen to say which of the handles had been the mistake. Silently, because
+        // remove mode turns every handle into a target and the operator is aiming at
+        // vertices; a modal complaint about one of them is noise.
+        if (widthPoint && index === points.length - 1) {
+          return points;
+        }
         if (points.length <= floor) {
           // A no-op rather than a shape that stops drawing. The renderer refuses a
           // geometry below its minimum and the sketch geometry returns nothing, so
@@ -924,9 +1010,10 @@ export const useDemoStore = create<DemoState>((set, get) => ({
           // and leave the operator with an empty selection they cannot undo.
           return points;
         }
-        return points.filter((_, i) => i !== index);
-      }),
-    ),
+        const next = points.filter((_, i) => i !== index);
+        return widthPoint ? axisPointsAfterCentreLineEdit(points, next) : next;
+      });
+    }),
 
   seedSample: () =>
     set((state) => ({
@@ -941,6 +1028,7 @@ export const useDemoStore = create<DemoState>((set, get) => ({
         points: controlPointsForRule(sample.drawRuleName, sample.points).map(
           ([lng, lat]) => [lng, lat] as [number, number],
         ),
+        drawRuleName: sample.drawRuleName,
         amplifiers: { ...sample.amplifiers },
       })),
       selectedGraphicId: null,
