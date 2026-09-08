@@ -1,0 +1,32 @@
+{
+  "name": "sip-milsym-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Client-only demo: drawing MIL-STD-2525D/E and APP-6(D)/(E) symbols with mil-sym-ts, laid out along sip-map-army's drawing system (catalog -> renderSymbol -> marker reconciler).",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  },
+  "dependencies": {
+    "@armyc2.c5isr.renderer/mil-sym-ts-web": "^2.10.4",
+    "maplibre-gl": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^7.0.0"
+  }
+}

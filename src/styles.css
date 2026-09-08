@@ -1,0 +1,1057 @@
+/* ==========================================================================
+ * The demo's chrome, and the four rules that are not chrome.
+ *
+ * `sip-map-army`'s stylesheet opens with a note worth repeating here, because this
+ * file inherits the decision: **no interface token reaches inside a marker.** A symbol
+ * is operational data drawn over a map, not chrome over a panel, and a symbol that
+ * changed colour with the operator's theme would be a different symbol. So the panels
+ * below are themed freely and the `.mark*` rules at the bottom are only the contact
+ * shadow that lifts a glyph off the tiles, the halo that says which mark is selected,
+ * the leader line, and the anchor overlay. The symbols themselves are painted by
+ * mil-sym-ts and never by this file.
+ * ========================================================================== */
+
+:root {
+  --bg: #0f1419;
+  --panel: #171e26;
+  --panel-2: #1e2731;
+  --line: #2b3644;
+  --ink: #e6edf3;
+  --ink-dim: #8a99a8;
+  --accent: #4c8fd6;
+  --danger: #d2554d;
+  --text-caption: 11px;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font:
+    13px/1.45 "Segoe UI",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.92em;
+}
+
+/* ----------------------------------------------------------------- the shell */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.shell__body {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 330px;
+  flex: 1;
+  min-height: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.topbar h1 {
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.topbar__sub {
+  margin-left: 8px;
+  color: var(--ink-dim);
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.topbar__controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.topbar__stat {
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail {
+  overflow-y: auto;
+  background: var(--panel);
+  min-height: 0;
+}
+
+.rail--left {
+  border-right: 1px solid var(--line);
+}
+
+.rail--right {
+  border-left: 1px solid var(--line);
+}
+
+/* ----------------------------------------------------------------- the panels */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panel__head h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.panel__head--sub {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.panel__head h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+.panel__count {
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+
+.hint--note {
+  padding: 7px 9px;
+  border-left: 2px solid var(--accent);
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+/* ----------------------------------------------------------------- form parts */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.field--row {
+  gap: 6px;
+}
+
+.field__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field__hint {
+  color: #5c6b7a;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.field--amp .field__label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+
+.amp__letter {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+}
+
+input[type="text"],
+input[type="search"],
+select {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+}
+
+input[type="color"] {
+  width: 42px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.check--select {
+  gap: 6px;
+  color: var(--ink-dim);
+}
+
+.check--select select {
+  width: auto;
+}
+
+.fill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+button {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+button.danger {
+  border-color: var(--danger);
+  color: #f2b7b3;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* ----------------------------------------------------------------- the tiles */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 84px;
+  padding: 6px 4px;
+  text-align: center;
+}
+
+.tile--picked {
+  border-color: var(--accent);
+  background: #1d2c3c;
+}
+
+.tile__name {
+  color: var(--ink-dim);
+  font-size: 10px;
+  line-height: 1.25;
+  /* Two lines and then an ellipsis: the standard's entity names run long ("Air Traffic
+     Services / Control Facility") and a tile that grew to fit the longest one would
+     make every other tile mostly empty. The full path is on the button's title. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ----------------------------------------------------------------- the glyph */
+
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  position: relative;
+}
+
+.glyph svg {
+  display: block;
+  overflow: visible;
+}
+
+.glyph--missing {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  min-height: 24px;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  color: var(--ink-dim);
+}
+
+.glyph--measured {
+  /* The reported image bounds, drawn. Everything the marker layer positions is measured
+     inside this box, so seeing it is most of understanding the offset. */
+  outline: 1px dashed rgba(255, 255, 255, 0.28);
+}
+
+.glyph__svg {
+  display: block;
+}
+
+.glyph__anchor,
+.mark__anchor {
+  position: absolute;
+  left: var(--anchor-x, 50%);
+  top: var(--anchor-y, 50%);
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: #ff5a4d;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95);
+  pointer-events: none;
+}
+
+.preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  /* Light, deliberately, and not a theme token: the preview is a symbol, and a symbol
+     is drawn to be read over terrain. Judging it against a dark panel would be judging
+     it against a background it will never be seen on. */
+  background: #d9d5cd;
+  color: #1b2430;
+  overflow: auto;
+}
+
+.measures {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+}
+
+.measures div {
+  display: flex;
+  gap: 6px;
+}
+
+.measures dt {
+  width: 42px;
+  color: #5a6675;
+}
+
+.measures dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------------------------------------------------------- the SIDC */
+
+.sidc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sidc__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+
+.sidc__digits {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.sidc__label {
+  color: #5c6b7a;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+/* ----------------------------------------------------------------- the map */
+
+/* Inside the map column, which is a flex column with the draw-hint bar above it. The
+ * `flex: 1` is load-bearing: without it the map is a zero-height box and the whole
+ * canvas disappears, which is what happened the first time the hint bar was added. */
+.map {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.map__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.map__note {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  margin: 0;
+  padding: 5px 9px;
+  border-radius: 4px;
+  background: rgba(15, 20, 25, 0.85);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+/* ----------------------------------------------------------------- boot */
+
+.boot {
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  height: 100vh;
+  padding: 40px;
+  text-align: center;
+}
+
+.boot p {
+  max-width: 52ch;
+  margin: 0 auto;
+  color: var(--ink-dim);
+}
+
+.boot--failed pre {
+  max-width: 80ch;
+  overflow-x: auto;
+  color: #f2b7b3;
+  text-align: left;
+}
+
+/* ==========================================================================
+ * The marks on the map.
+ *
+ * Literal ink below, not theme tokens, for the reason at the top of this file: these
+ * are drawn over base-map tiles, which are light in every scheme the demo offers, so
+ * they follow the tiles rather than the interface.
+ * ========================================================================== */
+
+.mark {
+  cursor: pointer;
+  will-change: transform;
+}
+
+.mark__glyph svg {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+
+.mark--selected {
+  cursor: grab;
+}
+
+.mark--selected:active {
+  cursor: grabbing;
+}
+
+.mark--selected .mark__glyph svg {
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.95));
+}
+
+.mark__missing {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px dashed rgba(15, 23, 42, 0.7);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.8);
+  color: rgba(15, 23, 42, 0.85);
+  font-weight: 700;
+}
+
+/* The leader line, from the glyph's anchor straight down to the ground point it was
+ * lifted off when the camera is pitched.
+ *
+ * Dashed, one pixel and grey on purpose. A solid vertical line under a unit frame is
+ * not decoration in this application — it is the staff of a headquarters, which the
+ * renderer draws several pixels wide in the affiliation's own colour. A leader that
+ * looked like one would turn every mark on a pitched map into a command post. */
+.mark__leader {
+  position: absolute;
+  left: var(--leader-x, 50%);
+  top: var(--leader-y, 50%);
+  width: 0;
+  height: var(--leader-h, 0);
+  border-left: 1px dashed rgba(15, 23, 42, 0.85);
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9));
+  pointer-events: none;
+}
+
+/* The foot, which is the thing actually being read: the point on the ground. */
+.mark__leader::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  bottom: -2px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.85);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9);
+}
+
+/* An amplifier the standard does not list for this symbol. Dimmed rather than
+ * disabled: the renderer's own table is the authority on what applies, but the demo
+ * exists to let someone try things — including finding out what the renderer does with
+ * a field it was not expecting. */
+.field--off .field__label {
+  opacity: 0.55;
+}
+
+/* ----------------------------------------------------------------- the rail tabs */
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  flex: 1;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px 6px;
+}
+
+.tab--on {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.tab:hover:not(.tab--on) {
+  border-bottom-color: var(--line);
+}
+
+/* The symbol set under a tile's name — the disambiguator, so four tiles reading
+ * "Radar" read as four entities rather than as a repeated row. */
+.tile__set {
+  color: #5c6b7a;
+  font-size: 9px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* ----------------------------------------------------------------- coverage */
+
+.cov__headline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--panel-2);
+}
+
+.cov__headline > strong {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.cov__headline > span {
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+
+.cov__headline strong {
+  color: var(--ink);
+}
+
+.cov__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.cov__row--strong {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.cov__label {
+  color: var(--ink-dim);
+}
+
+.cov__value {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cov__note {
+  flex-basis: 100%;
+  color: #5c6b7a;
+  font-size: 10px;
+}
+
+.cov__source {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 9px;
+  word-break: break-all;
+}
+
+.cov__table {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cov__tr {
+  display: grid;
+  grid-template-columns: 3fr 2fr 2fr 1.4fr 1.2fr 1.2fr;
+  gap: 4px;
+  padding: 3px 4px;
+  border-bottom: 1px solid #222b36;
+}
+
+.cov__tr > span:not(:first-child) {
+  text-align: right;
+}
+
+.cov__tr--head {
+  color: #5c6b7a;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cov__tr--head > span {
+  text-align: right;
+}
+
+.cov__tr--head > span:first-child {
+  text-align: left;
+}
+
+.cov__tr--on {
+  background: #1d2c3c;
+}
+
+.cov__tr--off {
+  opacity: 0.5;
+}
+
+.cov__dupe {
+  margin-left: 3px;
+  color: #d0a24c;
+  font-style: normal;
+  font-size: 9px;
+}
+
+/* The symbol-set table is three columns, not six. */
+.cov__table .cov__tr:has(.cov__set) {
+  grid-template-columns: 1.6rem 1fr auto;
+}
+
+.cov__set {
+  color: #5c6b7a;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.cov__setname {
+  text-align: left !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The like-for-like column, which is the one a reader should land on. */
+.cov__parts {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ----------------------------------------------------------------- the gallery */
+
+.viewtabs {
+  display: flex;
+  gap: 2px;
+  margin-left: 10px;
+}
+
+.viewtabs .tab {
+  padding: 6px 12px;
+}
+
+.gallery {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.gallery__bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.gallery__search {
+  width: 160px;
+}
+
+.gallery__stat {
+  margin-left: auto;
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gallery__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Light, and not a theme token, for the reason the marker rules give: these are symbols,
+   * and symbol artwork is drawn to be read over terrain. A gallery on a dark panel judges
+   * the wrong thing — pale fills with dark strokes look wrong against it in a way they
+   * never will on a map. */
+  background: #d9d5cd;
+  color: #1b2430;
+  padding: 0 12px 40px;
+}
+
+.gset__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 2px;
+  background: #d9d5cd;
+  border-bottom: 1px solid #b8b2a6;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #3a4654;
+}
+
+.gset__code {
+  font-family: ui-monospace, Consolas, monospace;
+  color: #6c7784;
+}
+
+.gset__count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: #6c7784;
+}
+
+.gset__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--cell, 80px), 1fr));
+  gap: 2px;
+  margin: 0 0 14px;
+  padding: 8px 0 0;
+  list-style: none;
+}
+
+.gcell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 2px;
+  border-radius: 3px;
+  text-align: center;
+}
+
+.gcell:hover {
+  background: #cfc9bd;
+}
+
+/* A category node: the renderer has no artwork for it and draws the bare frame. Marked
+ * rather than hidden by default, because "how many of these are real symbols" is exactly
+ * the question the gallery is being read to answer. */
+.gcell--frameonly {
+  opacity: 0.5;
+}
+
+.gcell--frameonly::after {
+  content: "no artwork";
+  font-size: 8px;
+  color: #8a2f28;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gcell__glyph {
+  display: grid;
+  place-items: center;
+  min-height: 46px;
+}
+
+.gcell__id {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 9px;
+  color: #6c7784;
+}
+
+.gcell__name {
+  font-size: 9px;
+  line-height: 1.2;
+  color: #3a4654;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ----------------------------------------------------------------- graphics */
+
+.mapcol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* What the next click will do, while a tactical graphic is being drawn. Above the map
+ * rather than over it, so it never covers the ground being clicked. */
+.drawhint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #1d2c3c;
+  font-size: 11px;
+}
+
+.drawhint__name {
+  font-weight: 600;
+}
+
+.drawhint__geom {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.drawhint__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.drawhint__how {
+  color: var(--ink-dim);
+  margin-right: auto;
+}
+
+.hint--warn {
+  padding: 7px 9px;
+  border-left: 2px solid var(--danger);
+  background: #2b1d1c;
+  color: #f2c9c6;
+}
+
+.field--wanted input {
+  border-color: var(--danger);
+}
+
+.vertices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+
+.vertices li {
+  display: flex;
+  gap: 6px;
+}
+
+.vertices__n {
+  display: inline-grid;
+  place-items: center;
+  min-width: 14px;
+  border-radius: 2px;
+  background: var(--panel-2);
+  color: #5c6b7a;
+}
+
+/* A tactical graphic's own lettering, drawn as a marker because a MapLibre symbol layer
+ * would need a glyph source the offline basemap does not have. Literal ink and a white
+ * halo for the reason the marker rules give: it is drawn over base-map tiles. */
+.graphic-label {
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow:
+    0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 4px rgba(255, 255, 255, 0.85);
+}
+
+/* The draw-hint bar carries two rows now: the counter, and the standard's own anchor
+ * point rule for the graphic being drawn. The rule is the load-bearing half — the clicks
+ * are not a path for most of the 67 rules. */
+.drawhint {
+  display: block;
+}
+
+.drawhint__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.drawhint__rule {
+  padding: 1px 5px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--accent);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 9px;
+}
+
+.drawhint__anchors {
+  margin: 4px 0 0;
+  color: var(--ink-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.drawhint__anchors strong {
+  color: var(--ink);
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+/* How many clicks a multipoint graphic takes, and its anchor point rule. On the tile
+ * because the catalog holds several graphics with the same name and different rules —
+ * "Main Attack" is a four-point axis, the Direction of Attack version is two clicks. */
+.tile__rule {
+  color: #4c8fd6;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
