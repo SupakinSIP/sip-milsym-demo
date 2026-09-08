@@ -1,7 +1,8 @@
 import { drawRuleTextOf } from "../symbology/index.js";
 import {
+  axisHalfWidthMetres,
   axisWidthCheck,
-  orderPointsForRule,
+  controlPointsForRule,
 } from "../symbology/renderGraphic.js";
 import { sketchKindOf } from "../sketch/kinds.js";
 import { useDemoStore } from "../state/useDemoStore.js";
@@ -9,30 +10,24 @@ import { useDemoStore } from "../state/useDemoStore.js";
 /**
  * What the click about to be made means, for the rules where it is not a path.
  *
- * Only the two axis rules, and only because their point order was **measured**. They are
- * labelled in the order an operator naturally clicks — rear, along the axis, then a width
- * — and `orderPointsForRule` turns that into the tip-first order the rule actually wants.
+ * Only the two axis rules, and only because their point order was **measured**. Every
+ * click is now on the axis itself — rear first, then toward the objective — because
+ * `controlPointsForRule` reverses them into the tip-first centre line the rule wants and
+ * derives the width control point. There used to be a third label here, for a click that
+ * had to land perpendicular to a leg that was not drawn yet; it is gone, and so is the
+ * shape it produced.
+ *
  * Every other rule shows the standard's own text instead of a label invented here: a
  * per-click label is a claim about geometry, and there are 67 rules to be wrong about.
  */
-function clickLabel(
-  ruleName: string,
-  index: number,
-  minPoints: number,
-): string | null {
+function clickLabel(ruleName: string, index: number): string | null {
   if (!ruleName.startsWith("AXIS")) {
     return null;
   }
-  // The **clicked** order, which is the natural one: an attack arrow is drawn from where
-  // you are toward the objective. `orderPointsForRule` flips it into the tip-first order the
-  // rule wants on the way to the renderer, so the operator never has to click backwards.
   if (index === 0) {
     return "the rear of the axis — where the attack starts";
   }
-  if (index < minPoints - 1) {
-    return "along the axis, toward the objective";
-  }
-  return "the width — one click off the arrowhead, perpendicular to the axis";
+  return "along the axis, toward the objective — the arrowhead is your last click";
 }
 
 /**
@@ -127,17 +122,19 @@ export function DrawHintBar(): React.JSX.Element | null {
   // mentioning when it is a real one.
   const capped = drawing.maxPoints < 100;
   const rule = drawRuleTextOf(drawing.drawRuleName);
-  const next = clickLabel(drawing.drawRuleName, have, drawing.minPoints);
-  // Checked while drawing, not after: once the width point is placed too far out the
-  // renderer throws the centre line away, and an arrow drawn from a discarded path is
-  // not obviously wrong on screen — it is just a thin wedge somewhere else.
-  // Against the **reordered** points, or the check measures the wrong leg: the renderer
-  // takes the perpendicular from the width point to the line out of the *tip*, and in
+  const next = clickLabel(drawing.drawRuleName, have);
+  // Still checked while drawing, and it now measures a point the tool derived rather than
+  // one the operator placed: the derivation caps the half width against the first leg, so
+  // `collapses` should never be true and a bar that ever shows it is reporting a bug in
+  // `axisWidthPoint` rather than a mis-click. Against the **control points**, not the
+  // clicks — the renderer takes the perpendicular from the line out of the *tip*, and in
   // clicked order the first point is the rear.
-  const width = axisWidthCheck(
-    drawing.drawRuleName,
-    orderPointsForRule(drawing.drawRuleName, drawing.points),
-  );
+  const control = controlPointsForRule(drawing.drawRuleName, drawing.points);
+  const width = axisWidthCheck(drawing.drawRuleName, control);
+  const derivedHalfWidth =
+    drawing.drawRuleName.startsWith("AXIS") && drawing.points.length >= 2
+      ? axisHalfWidthMetres([...drawing.points].reverse())
+      : null;
 
   return (
     <div className="drawhint" role="status">
@@ -155,8 +152,11 @@ export function DrawHintBar(): React.JSX.Element | null {
           {capped ? `–${drawing.maxPoints}` : "+"}
         </span>
         <span className="drawhint__how">
+          {/* The axis labels never run out — every click is another point on the centre
+              line — so the finish gesture has to ride along with them, or a two-click
+              graphic reads as one that still wants something. */}
           {next
-            ? `next click: ${next}`
+            ? `next click: ${next}${enough ? " · space to finish" : ""}`
             : enough
               ? capped && have >= drawing.maxPoints
                 ? "complete"
@@ -181,11 +181,19 @@ export function DrawHintBar(): React.JSX.Element | null {
       </div>
       {width?.collapses ? (
         <p className="drawhint__warn">
-          The width point is <strong>{Math.round(width.halfWidthMetres)} m</strong> off the
-          centre line and the first leg is only{" "}
-          <strong>{Math.round(width.firstLegMetres)} m</strong> long — at that ratio the
-          renderer discards the path and draws a stub. Put the width point closer to the
-          centre line, or move the second point further from the tip.
+          The derived width point is{" "}
+          <strong>{Math.round(width.halfWidthMetres)} m</strong> off the centre line and
+          the first leg is only <strong>{Math.round(width.firstLegMetres)} m</strong> long
+          — at that ratio the renderer discards the path and draws a stub. The derivation
+          caps the width against that leg, so seeing this is a bug in{" "}
+          <code>axisWidthPoint</code>, not a mis-click.
+        </p>
+      ) : derivedHalfWidth !== null && derivedHalfWidth > 0 ? (
+        <p className="drawhint__anchors">
+          Width is the tool's, not yours: the corridor comes out{" "}
+          <strong>{(Math.round(derivedHalfWidth * 2) / 1000).toFixed(1)} km</strong> across,
+          derived perpendicular to the arrowhead and capped against the first leg. It lands
+          as the last numbered handle, so drag it after placing to change it.
         </p>
       ) : null}
       {rule && rule.anchorPoints !== "" ? (
@@ -195,8 +203,8 @@ export function DrawHintBar(): React.JSX.Element | null {
           {drawing.drawRuleName.startsWith("AXIS") ? (
             <em>
               {" "}
-              These clicks are collected rear-first and reordered into that convention
-              before rendering.
+              Point N is not clicked: these clicks are the centre line, collected
+              rear-first, and the width point is derived from them.
             </em>
           ) : null}
         </p>

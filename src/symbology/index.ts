@@ -64,10 +64,16 @@ export {
 
 export type { GraphicCollection, GraphicFeature, GraphicOptions, GraphicResult } from "./renderGraphic.js";
 export {
+  axisHalfWidthMetres,
+  axisWidthCheck,
+  axisWidthPoint,
+  clickBudgetForRule,
+  controlPointsForRule,
   graphicCacheSize,
   renderGraphic,
   resetGraphicCache,
 } from "./renderGraphic.js";
+export type { AxisWidthCheck } from "./renderGraphic.js";
 
 /* ------------------------------------------------- the fields of a SIDC */
 

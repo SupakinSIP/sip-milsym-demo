@@ -13,7 +13,7 @@ the coverage claims can be checked by hand: search for a symbol, place it, lette
 ```bash
 npm install
 npm run dev            # http://localhost:5173  (add ?rail=coverage for the comparison)
-npm run smoke          # 57 checks in a headless browser (dev server must be up)
+npm run smoke          # 61 checks in a headless browser (dev server must be up)
 ```
 
 ![The coverage comparison](coverage.png)
@@ -290,13 +290,19 @@ map.army does not have this problem because MSS owns both the geometry and the g
 There is no code to borrow from a proprietary engine, so `src/sketch/` is the other way to
 get that behaviour: **click the path you can see, and it draws along it.**
 
+For the two axis rules the conformant path now owns its gesture too — two clicks along the
+axis, and the width control point is derived rather than clicked. See *Two clicks, and the
+width the tool derives* below. That closes the gap for one family of 67 rules; the sketch
+path is still the answer for the rest, because a rule whose points are radii and azimuths
+needs its own translation and this project has measured two.
+
 ![The sketch palette and three sketches on the map](sketch.png)
 
 | | conformant path | sketch path |
 | --- | --- | --- |
 | geometry from | mil-sym-ts `WebRenderer` | `src/sketch/geometry.ts` |
 | clicks mean | whatever the anchor point rule says | the path, always |
-| Main attack | 4 clicks: tip, centre line, width point | **2+ clicks along the axis** |
+| Main attack | **2+ clicks along the axis**, width derived | **2+ clicks along the axis** |
 | ornament size | derived from the map scale, re-rendered on `zoomend` | pixels, constant by construction |
 | coordinates | longitude and latitude | anchors are geographic, everything else is screen space |
 | conformant? | **yes** | **no — approximations** |
@@ -366,11 +372,17 @@ And the anchor-point rule getting it wrong, then right:
 ![Main Attack: the wrong click order and the right one](axis-check.png)
 
 Pick a line or area symbol in the browser and the map switches to the drawing tool: click
-to add vertices, double-click to finish, `Esc` to cancel. The hint bar reads the required
-point count out of the renderer's own tables — `MSInfo.getMinPointCount()` — and shows
-the standard's **anchor point rule**, because for many graphics the clicks are not a path.
-See *Where the drawing logic comes from* below: getting that wrong drew Main Attack as a
-hairline wedge.
+to add vertices, space or a double-click to finish, `Esc` to cancel. The hint bar reads
+the required point count out of the renderer's own tables — `MSInfo.getMinPointCount()` —
+and shows the standard's **anchor point rule**, because for many graphics the clicks are
+not a path. See *Where the drawing logic comes from* below: getting that wrong drew Main
+Attack as a hairline wedge.
+
+From the click that reaches the minimum, the shape is **previewed by the renderer
+itself** — the same `renderGraphic` call the placed graphic gets, through the same
+translation — with the clicked path dashed over it. So the arrowhead, the taper and the
+lettering are on screen before the shape is committed, which for an axis graphic is the
+only way to see what the derived width did.
 
 What comes back per graphic is a handful of features: `MultiLineString` and `Polygon` for
 the drawing, each carrying `strokeColor`, `strokeWidth`, `fillColor`, `fillOpacity` and
@@ -463,8 +475,8 @@ Three things changed:
    all 89 rules (87 with anchor-point text) from the library's declarations, quoted
    verbatim. The draw-hint bar shows the rule while the operator clicks, so the order is
    on screen rather than guessed. For the two axis rules — the ones whose order was
-   measured — each click is labelled: *tip of the arrowhead*, *centre line running back
-   from the tip*, *width, offset perpendicular from the tip*.
+   measured — each click is labelled: *the rear of the axis*, then *along the axis, toward
+   the objective*.
 3. **The collapse condition is checked live.** `axisWidthCheck` computes the half-width and
    the first leg, and the bar warns before the shape is committed rather than leaving a
    wrong picture on the map.
@@ -472,6 +484,57 @@ Three things changed:
 Locked with four checks: the rule is on the entry, the centre line follows the clicks when
 the tip is first and does not when it is not, the width is the perpendicular distance to
 leg one, and an over-wide axis is caught.
+
+### Two clicks, and the width the tool derives
+
+Getting the order right made the arrow correct and left the **gesture** wrong, and the
+gesture is what an operator actually meets. Under the fix above, Main Attack took four
+clicks and the fourth of them had to land perpendicular to a leg that was not drawn yet,
+close enough to the centre line not to trip a collapse condition that lives in the
+library's source. Put it out where it looks like a width and the arrow comes back as a
+hairline wedge — the exact failure the reorder was supposed to have fixed, moved one click
+later. map.army takes **two clicks**.
+
+The standard was never what stood in the way. `AXIS1`/`AXIS2` define **control points**,
+not clicks, and a control point the tool computes is as conformant as one a mouse
+produced — what reaches the renderer is the standard's convention either way. So the axis
+gesture is now:
+
+- the operator clicks the **axis only**, rear → arrowhead, two clicks or more;
+- `controlPointsForRule` reverses that into the tip-first centre line the rule wants;
+- and it **derives point N itself** — perpendicular to the first leg, offset from the tip,
+  at 10% of the axis's own length, **capped at 35% of leg one**.
+
+That cap is the whole safety argument: the renderer's collapse test compares the half
+width against leg one, so a width that can never exceed a third of it can never trip the
+test. Not safe in the cases that were tried — safe by construction.
+
+| | before | now |
+| --- | --- | --- |
+| clicks for Main Attack | 4, the last one a width | **2+, all on the axis** |
+| the width | the operator's, and blind | the tool's, then draggable |
+| collapsed into a wedge | whenever the width click was generous | **cannot** |
+| tile reads | `3+ pts · AXIS2` (control points) | `2+ pts · AXIS2` (clicks) |
+
+The derived point is a **real control point at index N** of the stored geometry, so it is
+one of the numbered handles the point editor already drags: the width is a default, not a
+decision taken away from the operator. Two clicks to place, one drag to adjust — which is
+what map.army's own Point Editor documentation describes, and it needed no geometry from
+MSS to arrive at.
+
+The counts had to follow the gesture rather than the geometry. `clickBudgetForRule` turns
+a rule's control-point range into a **click** range — one shorter for `AXIS*`, untouched
+for everything else — and the tile, the hint bar's *point N of M* and the commit threshold
+all read it, because a tool that asks for a click it will then ignore is worse than one
+that asks for the wrong number of clicks.
+
+Five checks: three clicks in gives four control points out with the path reversed and
+nothing else moved; **two clicks draw the arrow** and the rear click sits on the drawn
+centre line within a half width (1,839 m against a 3,700 m half width); an axis rule's
+click budget is one short of its control points while `AREA1` passes through; the derived
+width does not trip the collapse condition for four shapes of axis — including a dog-leg
+whose final leg is metres long, which is the case that used to fail; and the derived offset
+is square off the arrowhead, checked as a dot product rather than by eye.
 
 ### The scale was hardcoded, and decorated lines paid for it
 
@@ -514,7 +577,7 @@ rules — and picking by name gets whichever the search ranked first:
 
 | entity | name | rule | clicks |
 | --- | --- | --- | --- |
-| `25151403` | Axis of Advance / **Main Attack** | `AXIS2` | 4 (path + a width point) |
+| `25151403` | Axis of Advance / **Main Attack** | `AXIS2` | 3 control points, **2 clicks** |
 | `25140602` | Direction of Attack / **Friendly Main Attack (Decisive)** | `LINE1` | **2** |
 
 `25140602` is the two-click arrow: click a start and an end, and the renderer returns the
@@ -765,7 +828,7 @@ src/
     useDemoStore.ts  marks, selection, draft. In memory; a reload loses them, on purpose
   components/        the browser, the gallery, the coverage report, the panel, the map
 scripts/
-  smoke-browser.ts   the 57 checks
+  smoke-browser.ts   the 61 checks
   smoke.mjs          the driver
   gen-map-army-fixture.mjs  rebuilds the fixture from a sip-map-army checkout
   gen-draw-rules.mjs        extracts the 89 anchor-point rules from the library

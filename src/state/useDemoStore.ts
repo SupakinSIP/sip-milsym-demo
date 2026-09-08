@@ -9,7 +9,7 @@ import {
   type Amplifiers,
   type SidcFields,
 } from "../symbology/index.js";
-import { orderPointsForRule } from "../symbology/renderGraphic.js";
+import { controlPointsForRule } from "../symbology/renderGraphic.js";
 import { sketchKindOf } from "../sketch/kinds.js";
 
 /**
@@ -301,7 +301,7 @@ const SAMPLE_GRAPHICS: readonly {
   /**
    * In **clicked** order, exactly as an operator would put them down.
    *
-   * Not the renderer order: the sample goes through `orderPointsForRule` on the way in,
+   * Not the renderer order: the sample goes through `controlPointsForRule` on the way in,
    * the same as a shape drawn on the map, so the data here has one convention and the
    * translation has one place. A sample written in renderer order would be the only
    * points in the project that skipped it.
@@ -366,25 +366,26 @@ const SAMPLE_GRAPHICS: readonly {
   {
     // Main Attack, and the point order is the whole reason it is in the sample.
     //
-    // Rule AXIS2, and the order is not what a drawing tool naturally collects. Read out
+    // Rule AXIS2, and its control points are not what a drawing tool collects. Read out
     // of the library: point 1 is the **arrowhead tip**, points 2..N-1 run back along the
     // centre line to the rear, and point N is a **width control point** whose
     // perpendicular distance to the first leg is the half width. Collected as a
     // tail-to-tip path — the first thing this demo did — the arrow comes out backwards
     // with the last click eaten as a width.
     //
-    // And the half width must stay under the length of the first leg, or
-    // `clsUtility.FilterAXADPoints` throws the whole centre line away and extends a stub
-    // along leg one instead. Here leg one is about 17 km and the half width about 1 km.
+    // So the sample is three clicks along the axis, the way an operator draws it, and
+    // `controlPointsForRule` reverses them and derives point N. The half width must stay
+    // under the length of the first leg or `clsUtility.FilterAXADPoints` throws the whole
+    // centre line away and extends a stub along leg one instead — which is what the
+    // derivation's cap against leg one exists to make impossible. Here leg one is about
+    // 17 km and the derived half width about 4 km.
     basicId: "25151403",
     name: "Main Attack",
-    // Clicked order: rear, mid, arrowhead, then the width point. `orderPointsForRule`
-    // turns this into the tip-first order AXIS2 wants.
+    // Clicked order: rear, mid, arrowhead. No width click — see controlPointsForRule.
     points: [
       [100.36, 13.62],
       [100.54, 13.66],
       [100.7, 13.63],
-      [100.7, 13.64],
     ],
     drawRuleName: "AXIS2",
     fields: {},
@@ -395,7 +396,7 @@ const SAMPLE_GRAPHICS: readonly {
     //
     // The catalog holds two graphics that both read as a main attack, drawn under
     // different rules. `25151403` is Axis of Advance / Main Attack — rule AXIS2, an area
-    // of advance with a width, four clicks. This one is Direction of Attack / Friendly
+    // of advance with a width derived from the axis. This one is Direction of Attack / Friendly
     // Main Attack (Decisive) — rule LINE1, **two clicks and an arrow**, and its geometry
     // is independent of the map scale.
     //
@@ -745,9 +746,9 @@ export const useDemoStore = create<DemoState>((set, get) => ({
               id,
               sidc: drawing.sidc,
               name: drawing.name,
-              // Clicks in, the standard order out. See orderPointsForRule: an axis
+              // Clicks in, the standard order out. See controlPointsForRule: an axis
               // graphic is clicked rear-to-arrowhead and stored tip-first.
-              points: orderPointsForRule(drawing.drawRuleName, points).map(
+              points: controlPointsForRule(drawing.drawRuleName, points).map(
                 ([lng, lat]) => [lng, lat] as [number, number],
               ),
               amplifiers: {},
@@ -777,7 +778,7 @@ export const useDemoStore = create<DemoState>((set, get) => ({
             id,
             sidc: drawing.sidc,
             name: drawing.name,
-            points: orderPointsForRule(drawing.drawRuleName, drawing.points).map(
+            points: controlPointsForRule(drawing.drawRuleName, drawing.points).map(
               ([lng, lat]) => [lng, lat] as [number, number],
             ),
             amplifiers: {},
@@ -937,7 +938,7 @@ export const useDemoStore = create<DemoState>((set, get) => ({
           ...sample.fields,
         }),
         name: sample.name,
-        points: orderPointsForRule(sample.drawRuleName, sample.points).map(
+        points: controlPointsForRule(sample.drawRuleName, sample.points).map(
           ([lng, lat]) => [lng, lat] as [number, number],
         ),
         amplifiers: { ...sample.amplifiers },

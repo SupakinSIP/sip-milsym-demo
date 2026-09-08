@@ -2,6 +2,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 import {
   STANDARDS,
   catalogOf,
+  clickBudgetForRule,
   composeSidc,
   searchCatalog,
   standardOf,
@@ -76,13 +77,21 @@ export function SymbolBrowser(): React.JSX.Element {
       setBasicId(entry.basicId);
       return;
     }
+    // The catalog's counts are **control points**; the tool collects **clicks**, and for
+    // an axis graphic one control point is derived rather than clicked. Passing the
+    // library's number straight through is what made the tool ask for a width click.
+    const budget = clickBudgetForRule(
+      entry.drawRuleName,
+      entry.minPoints,
+      entry.maxPoints,
+    );
     startDrawing({
       basicId: entry.basicId,
       sidc: composeSidc(entry.basicId, draft.fields),
       name: entry.name,
       geometry: entry.geometry,
-      minPoints: entry.minPoints,
-      maxPoints: entry.maxPoints,
+      minPoints: budget.minClicks,
+      maxPoints: budget.maxClicks,
       drawRuleName: entry.drawRuleName,
     });
   };
@@ -179,15 +188,30 @@ export function SymbolBrowser(): React.JSX.Element {
                 <span className="tile__set">{entry.symbolSetName}</span>
                 {/* How many clicks it takes, and under which rule — because the catalog
                     holds several graphics of the same name that are drawn differently.
-                    "Main Attack" is AXIS2 and wants four points including a width; the
-                    Direction of Attack version of the same idea is LINE1 and is two
-                    clicks and an arrow. Without this the operator picks by name and gets
-                    whichever the search ranked first. */}
+                    "Main Attack" is AXIS2 and "Direction of Attack" is LINE1, and they
+                    letter and taper differently. Without this the operator picks by name
+                    and gets whichever the search ranked first.
+
+                    Clicks, not control points: an axis graphic's width point is derived,
+                    so AXIS2 reads "2+ pts" here while the library's minimum is 3. The
+                    number an operator can act on is the number of times they click. */}
                 {entry.geometry === "point" ? null : (
                   <span className="tile__rule">
-                    {entry.minPoints}
-                    {entry.maxPoints > 100 ? "+" : `–${entry.maxPoints}`} pts ·{" "}
-                    {entry.drawRuleName}
+                    {clickBudgetForRule(
+                      entry.drawRuleName,
+                      entry.minPoints,
+                      entry.maxPoints,
+                    ).minClicks}
+                    {entry.maxPoints > 100
+                      ? "+"
+                      : `–${
+                          clickBudgetForRule(
+                            entry.drawRuleName,
+                            entry.minPoints,
+                            entry.maxPoints,
+                          ).maxClicks
+                        }`}{" "}
+                    pts · {entry.drawRuleName}
                   </span>
                 )}
               </button>

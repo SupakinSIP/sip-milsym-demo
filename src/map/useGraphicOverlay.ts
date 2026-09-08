@@ -1,7 +1,11 @@
 import { useEffect } from "react";
 import type { GeoJSONSource, Map as MlMap, Marker } from "maplibre-gl";
 import maplibregl from "maplibre-gl";
-import { renderGraphic, type GraphicFeature } from "../symbology/renderGraphic.js";
+import {
+  controlPointsForRule,
+  renderGraphic,
+  type GraphicFeature,
+} from "../symbology/renderGraphic.js";
 import { useDemoStore } from "../state/useDemoStore.js";
 
 /**
@@ -245,6 +249,37 @@ export function useGraphicOverlay(map: MlMap | null, ready: boolean): void {
         }
       }
 
+      /* ------------------------------------------------- the shape before it is placed */
+
+      // The other half of the two-click gesture: the graphic is drawn by the real
+      // renderer from the click after it has enough points, so what the operator commits
+      // is what they have already seen. Without this, an axis graphic's derived width is
+      // a number in the hint bar and the shape is a surprise — which is the same
+      // complaint as clicking a width point blind, moved one step later.
+      //
+      // Through `controlPointsForRule`, so the preview and the placed shape are built
+      // from the same translation rather than two that have to be kept in agreement.
+      if (drawing && drawing.points.length >= drawing.minPoints) {
+        const preview = renderGraphic(
+          drawing.sidc,
+          controlPointsForRule(drawing.drawRuleName, drawing.points),
+          { lineWidth: 3, scale: mapScale },
+        );
+        if (preview.ok) {
+          for (const feature of preview.collection.features) {
+            if (feature.geometry.type === "Point") {
+              // The lettering is left off the preview: a half-drawn graphic has no
+              // designation typed yet, and the labels are markers rather than features.
+              continue;
+            }
+            features.push({
+              ...feature,
+              properties: { ...feature.properties, graphicId: "draft" },
+            });
+          }
+        }
+      }
+
       const source = map.getSource(SOURCE) as GeoJSONSource | undefined;
       source?.setData({ type: "FeatureCollection", features } as never);
 
@@ -330,6 +365,10 @@ export function useGraphicOverlay(map: MlMap | null, ready: boolean): void {
 
       const draftFeatures: GraphicFeature[] = [];
       if (drawing && drawing.points.length > 0) {
+        // The clicks, over the preview: the dashed line is the centre line the operator
+        // put down, and for an axis rule that is not the same thing as the drawn shape —
+        // point 1 of the geometry is the *last* click. Showing both is what makes the
+        // reversal visible instead of something the operator has to be told about.
         for (const point of drawing.points) {
           draftFeatures.push({
             type: "Feature",
@@ -366,7 +405,10 @@ export function useGraphicOverlay(map: MlMap | null, ready: boolean): void {
 
     const onClickGraphic = (event: maplibregl.MapLayerMouseEvent): void => {
       const id = event.features?.[0]?.properties?.["graphicId"];
-      if (typeof id === "string") {
+      // "draft" is the preview of the shape being drawn, and it is not selectable: a
+      // click during drawing is another point, and selecting a graphic that is not in
+      // the document yet would leave the panel holding an id nothing answers to.
+      if (typeof id === "string" && id !== "draft") {
         // Stops the map's own handler from also placing a mark or adding a point.
         event.originalEvent.stopPropagation();
         useDemoStore.getState().selectGraphic(id);

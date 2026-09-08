@@ -213,33 +213,133 @@ export function renderGraphic(
 /* ------------------------------------------------- clicks in, standard order out */
 
 /**
- * The operator's clicks, reordered into the order the standard's rule expects.
+ * The gesture, and the two clicks map.army gets away with.
  *
- * **The tool should bend to the operator's gesture, not the other way round.** An attack
- * arrow is drawn the way it is fought: from where you are, toward the objective. The
- * standard's `AXIS1`/`AXIS2` rule wants the opposite — point 1 is the *tip* of the
- * arrowhead and the centre line runs backwards from it, with the last point a width. Both
- * facts are true at once, so something has to translate, and asking the operator to click
- * an arrow backwards is the wrong half to fix.
+ * `map.army`'s offensive-line arrow takes **two clicks** and comes out clean, and the
+ * reason is not a better renderer: MSS owns both the geometry and the gesture, so it can
+ * decide that the operator's clicks are the axis and that everything else about the shape
+ * — how wide the corridor is, where the back of the arrowhead sits — is the tool's
+ * problem rather than the operator's.
  *
- * So the drawing tool collects **rear → arrowhead, then one click for the width**, and
- * this function hands the renderer `[arrowhead, …reversed middle…, rear, width]`.
+ * Nothing stops this project from making the same decision, and the standard is not what
+ * was in the way. `AXIS1`/`AXIS2` define **control points**, not clicks:
+ *
+ * > "Point 1 defines the tip of the arrowhead. Point N-1 defines the rear of the symbol.
+ * > Point N defines the back of the arrowhead. … Points 1 through N-1 determine the
+ * > symbol's center line and Point N determines the width."
+ *
+ * A control point the tool computes is as conformant as one a mouse produced — what goes
+ * to the renderer is the standard's convention either way. So the axis gesture is now:
+ *
+ * - the operator clicks **the axis only**, rear → arrowhead, two clicks or more;
+ * - this function reverses that into the tip-first centre line the rule wants;
+ * - and it **derives point N itself**, perpendicular to the first leg, at a width that
+ *   cannot trip the renderer's collapse condition (see `axisWidthCheck`).
+ *
+ * The derived point is a real control point in the stored geometry, at index N, so it is
+ * one of the numbered handles the point editor drags: the width is a default, not a
+ * decision taken away. That is the whole mechanism — two clicks to place, one drag to
+ * adjust — and it is why an operator no longer has to click a width point perpendicular
+ * to a leg they cannot see yet, which is the click that produced a fan of hairline wedges.
  *
  * Everything else is passed through untouched. `AREA*` and most `LINE*` rules genuinely
  * are "click the shape", and a rule this function does not name is a rule whose order has
  * not been measured — passing it through is the only honest thing to do with it. See
  * `drawRuleTextOf` for what the other 65 rules say about their own points.
  */
-export function orderPointsForRule(
+export function controlPointsForRule(
   ruleName: string,
   clicked: readonly (readonly [number, number])[],
 ): readonly (readonly [number, number])[] {
-  if (!ruleName.startsWith("AXIS") || clicked.length < 3) {
+  if (!ruleName.startsWith("AXIS") || clicked.length < 2) {
     return clicked;
   }
-  const width = clicked[clicked.length - 1]!;
-  const path = clicked.slice(0, -1);
-  return [...path].reverse().concat([width]);
+  const centreLine = [...clicked].reverse();
+  return [...centreLine, axisWidthPoint(centreLine)];
+}
+
+/**
+ * How many clicks a rule actually asks of the operator.
+ *
+ * The catalog's `minPoints`/`maxPoints` come from the library and count **control
+ * points**. For an axis graphic one of those is derived rather than clicked, so the
+ * gesture is one shorter than the geometry — and the hint bar, the tile and the commit
+ * threshold all have to agree on which of the two numbers they are talking about, or the
+ * tool asks for a click it will then ignore.
+ */
+export function clickBudgetForRule(
+  ruleName: string,
+  minPoints: number,
+  maxPoints: number,
+): { minClicks: number; maxClicks: number } {
+  if (!ruleName.startsWith("AXIS")) {
+    return { minClicks: minPoints, maxClicks: maxPoints };
+  }
+  return {
+    minClicks: Math.max(2, minPoints - 1),
+    maxClicks: Math.max(2, maxPoints - 1),
+  };
+}
+
+/**
+ * The half width this tool gives an axis it was not told the width of.
+ *
+ * A fraction of the axis's own length, because an axis of advance is drawn at the scale
+ * of the advance: a 40 km axis with a 200 m corridor is a line with a pretence of width,
+ * and the same corridor on a 2 km axis is a blob. Capped against the **first leg**
+ * because that is the quantity the renderer's collapse test compares against — see
+ * `axisWidthCheck`. The cap is what makes the two-click gesture safe by construction
+ * rather than safe in the cases that were tried.
+ */
+const AXIS_WIDTH_OF_LENGTH = 0.1;
+const AXIS_WIDTH_LEG_CAP = 0.35;
+
+export function axisHalfWidthMetres(
+  centreLine: readonly (readonly [number, number])[],
+): number {
+  if (centreLine.length < 2) {
+    return 0;
+  }
+  let total = 0;
+  for (let i = 1; i < centreLine.length; i += 1) {
+    total += distanceMetres(centreLine[i - 1]!, centreLine[i]!);
+  }
+  const firstLeg = distanceMetres(centreLine[0]!, centreLine[1]!);
+  return Math.min(total * AXIS_WIDTH_OF_LENGTH, firstLeg * AXIS_WIDTH_LEG_CAP);
+}
+
+/**
+ * Point N: offset from the tip, perpendicular to the first leg.
+ *
+ * Offset from the **tip** and not from a point back along the axis, because that is the
+ * geometry the sample laydown and the stray measurement were taken against — the drawn
+ * centre line hugs the clicked path to within a half width when point N sits square off
+ * point 1. The perpendicular is taken in local metres with longitude scaled by the
+ * latitude, then converted back, so the offset is the same distance on the ground at any
+ * longitude rather than the same number of degrees.
+ */
+export function axisWidthPoint(
+  centreLine: readonly (readonly [number, number])[],
+): [number, number] {
+  const tip = centreLine[0]!;
+  const next = centreLine[1] ?? centreLine[0]!;
+  const halfWidth = axisHalfWidthMetres(centreLine);
+  const scale = Math.cos((tip[1] * Math.PI) / 180) * METRES_PER_DEGREE;
+  const dx = (next[0] - tip[0]) * scale;
+  const dy = (next[1] - tip[1]) * METRES_PER_DEGREE;
+  const length = Math.hypot(dx, dy);
+  if (length === 0 || halfWidth === 0) {
+    return [tip[0], tip[1]];
+  }
+  // Left of the tip→rear direction. Which side is arbitrary — the renderer takes the
+  // perpendicular *distance* — so it is fixed rather than chosen, and the handle can be
+  // dragged to the other side without changing the drawn shape.
+  const px = -dy / length;
+  const py = dx / length;
+  return [
+    tip[0] + (px * halfWidth) / scale,
+    tip[1] + (py * halfWidth) / METRES_PER_DEGREE,
+  ];
 }
 
 /* ------------------------------------------------- the axis rules and their trap */

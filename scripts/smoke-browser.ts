@@ -41,8 +41,11 @@ import {
 } from "../src/symbology/coverage.js";
 import { crosswalk } from "../src/symbology/crosswalk.js";
 import {
+  axisHalfWidthMetres,
   axisWidthCheck,
-  orderPointsForRule,
+  axisWidthPoint,
+  clickBudgetForRule,
+  controlPointsForRule,
   renderGraphic,
 } from "../src/symbology/renderGraphic.js";
 import { useDemoStore } from "../src/state/useDemoStore.js";
@@ -616,7 +619,7 @@ check(
 );
 
 check(
-  "the sample laydown's Main Attack is drawn the standard's way",
+  "the sample laydown's Main Attack is drawn the standard's way from axis clicks alone",
   (() => {
     useDemoStore.getState().seedSample();
     const graphic = useDemoStore
@@ -736,29 +739,153 @@ check(
 
 check(
   // The tool bends to the gesture: an attack arrow is clicked from the rear toward the
-  // objective, and the reorder hands the renderer the tip-first order AXIS2 wants. Both
-  // orders must produce the same picture, or the translation is not a translation.
-  "clicking rear-first draws the same arrow as the standard's order",
+  // objective, and the translation hands the renderer the tip-first centre line AXIS2
+  // wants with a width point appended. The clicks must survive the trip reversed and
+  // otherwise untouched, or the translation is not a translation.
+  "clicking rear-first gives the standard's tip-first centre line",
   (() => {
     const clicked: [number, number][] = [
       [100.36, 13.62],
       [100.54, 13.66],
       [100.7, 13.63],
-      [100.7, 13.64],
     ];
-    const standard: [number, number][] = [
-      [100.7, 13.63],
-      [100.54, 13.66],
-      [100.36, 13.62],
-      [100.7, 13.64],
-    ];
-    const reordered = orderPointsForRule("AXIS2", clicked);
+    const control = controlPointsForRule("AXIS2", clicked);
     const same =
-      JSON.stringify(reordered) === JSON.stringify(standard.map((p) => p));
-    const drawn = renderGraphic(MAIN_ATTACK, reordered);
-    return same && drawn.ok;
+      JSON.stringify(control.slice(0, -1)) ===
+      JSON.stringify([...clicked].reverse());
+    const drawn = renderGraphic(MAIN_ATTACK, control);
+    return control.length === 4 && same && drawn.ok;
   })(),
-  { note: "reversed path, width point kept last" },
+  { note: "3 clicks in, 4 control points out: the reversed path plus a derived width" },
+);
+
+check(
+  // **The mechanism map.army has and this did not.** Two clicks along the axis and the
+  // arrow is drawn — no width click, and the drawn centre line still hugs the clicks.
+  // The bound is the derived half width rather than zero because what comes back is the
+  // two edges of the corridor; the shape this replaces strayed by kilometres.
+  "two clicks along the axis draw the arrow",
+  (() => {
+    const clicked: [number, number][] = [
+      [100.36, 13.62],
+      [100.7, 13.63],
+    ];
+    const control = controlPointsForRule("AXIS2", clicked) as [number, number][];
+    const half = axisHalfWidthMetres([...clicked].reverse());
+    return (
+      control.length === 3 &&
+      renderGraphic(MAIN_ATTACK, control).ok &&
+      axisWidthCheck("AXIS2", control)?.collapses === false &&
+      strayMetres(control, [1]) < half * 1.5
+    );
+  })(),
+  {
+    note: "the rear click is on the drawn centre line, within a half width",
+    strayMetres: Math.round(
+      strayMetres(
+        controlPointsForRule("AXIS2", [
+          [100.36, 13.62],
+          [100.7, 13.63],
+        ]) as [number, number][],
+        [1],
+      ),
+    ),
+  },
+);
+
+check(
+  // The gesture is one click shorter than the geometry, and everything that counts
+  // clicks has to say so — the tile, the hint bar's "point N of M", and the commit
+  // threshold. AXIS2's library minimum is 3 control points; its gesture is 2 clicks.
+  "an axis graphic's click budget is one short of its control points",
+  (() => {
+    const entry = catalogD.entries.find((e) => e.basicId === "25151403");
+    if (!entry) {
+      return false;
+    }
+    const axis = clickBudgetForRule(
+      entry.drawRuleName,
+      entry.minPoints,
+      entry.maxPoints,
+    );
+    const area = clickBudgetForRule("AREA1", 3, 50);
+    return (
+      entry.minPoints === 3 &&
+      axis.minClicks === 2 &&
+      axis.maxClicks === entry.maxPoints - 1 &&
+      area.minClicks === 3 &&
+      area.maxClicks === 50
+    );
+  })(),
+  { note: "AXIS budgets shrink by one, every other rule passes through" },
+);
+
+check(
+  // The derived width is what makes two clicks safe, so it has to be safe at every shape
+  // of axis — including the one that used to collapse: a tiny first leg with a long tail
+  // behind it. Capping against leg one is for exactly that case.
+  "the derived width never trips the renderer's collapse condition",
+  (() => {
+    const axes: [number, number][][] = [
+      // A long straight axis.
+      [
+        [100.0, 13.6],
+        [101.0, 13.6],
+      ],
+      // A dog-leg whose *last* leg — leg one of the centre line — is tiny.
+      [
+        [100.0, 13.6],
+        [100.9, 13.62],
+        [100.905, 13.621],
+      ],
+      // A short axis, where a fraction of the length is a few hundred metres.
+      [
+        [100.5, 13.5],
+        [100.508, 13.503],
+      ],
+      // Many points, folding back on itself.
+      [
+        [100.2, 13.4],
+        [100.4, 13.5],
+        [100.3, 13.6],
+        [100.6, 13.65],
+      ],
+    ];
+    return axes.every((clicked) => {
+      const control = controlPointsForRule("AXIS2", clicked);
+      const measured = axisWidthCheck("AXIS2", control);
+      return (
+        measured !== null &&
+        !measured.collapses &&
+        measured.halfWidthMetres <= measured.firstLegMetres * 0.36 &&
+        renderGraphic(MAIN_ATTACK, control).ok
+      );
+    });
+  })(),
+  { note: "four shapes of axis, including a dog-leg with a metres-long final leg" },
+);
+
+check(
+  // The derived point is perpendicular to leg one and offset from the **tip**, because
+  // that is the geometry the stray measurement was taken against. Checked as a right
+  // angle rather than by eye: the dot product of the leg and the offset.
+  "the derived width point is square off the arrowhead",
+  (() => {
+    const centreLine: [number, number][] = [
+      [100.7, 13.63],
+      [100.36, 13.62],
+    ];
+    const width = axisWidthPoint(centreLine);
+    const scale = Math.cos((13.63 * Math.PI) / 180) * 111320;
+    const legX = (centreLine[1]![0] - centreLine[0]![0]) * scale;
+    const legY = (centreLine[1]![1] - centreLine[0]![1]) * 111320;
+    const offX = (width[0] - centreLine[0]![0]) * scale;
+    const offY = (width[1] - centreLine[0]![1]) * 111320;
+    const dot = legX * offX + legY * offY;
+    const lengths = Math.hypot(legX, legY) * Math.hypot(offX, offY);
+    return Math.abs(dot / lengths) < 1e-6;
+  })(),
+  { note: "the dot product of leg one and the derived offset is zero" },
 );
 
 check(
@@ -772,9 +899,9 @@ check(
       [100.6, 13.4],
     ];
     return (
-      JSON.stringify(orderPointsForRule("AREA1", points)) ===
+      JSON.stringify(controlPointsForRule("AREA1", points)) ===
         JSON.stringify(points) &&
-      JSON.stringify(orderPointsForRule("LINE1", points)) ===
+      JSON.stringify(controlPointsForRule("LINE1", points)) ===
         JSON.stringify(points)
     );
   })(),
