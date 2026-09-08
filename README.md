@@ -13,12 +13,57 @@ the coverage claims can be checked by hand: search for a symbol, place it, lette
 ```bash
 npm install
 npm run dev            # http://localhost:5173  (add ?rail=coverage for the comparison)
-npm run smoke          # 45 checks in a headless browser (dev server must be up)
+npm run smoke          # 57 checks in a headless browser (dev server must be up)
 ```
 
 ![The coverage comparison](coverage.png)
 
 ---
+
+## What map.army actually draws with — and what this project has been comparing against
+
+**map.army is not built on either free library.** Its own documentation names the engine:
+
+> "MSS® (Military Symbol Service)" and "MilX® (Military Exchange Format)" … "The web
+> application including the backend services have been developed by gs-soft AG."
+> — [map.army/about](https://www.map.army/about/en.html),
+> [map.army symbol gallery](https://www.map.army/doc/en/symbols/symbol-gallery/)
+
+So its drawing logic is **proprietary**, from a Swiss vendor, with MIL-STD-2525C as its
+baseline. That is consistent with everything visible in its interface: the palette is
+grouped as *Lines of Coordination*, *Base Deployments*, *Defensive Lines*, *Offensive
+Lines*, *Mines and Obstacles* — a vendor taxonomy, not 2525's symbol sets — and its
+offensive-line arrow takes two clicks and comes out clean, because MSS owns both the
+geometry and the gesture that produces it.
+
+Neither `milsymbol` (MIT) nor `mil-sym-ts` (Apache-2.0) is involved, so there is no
+drawing logic there to copy: an MSS licence is the way to get MSS behaviour.
+
+### This matters for the coverage numbers in this README
+
+The baseline labelled *map.army* throughout this document is **not** measured from
+map.army. It is read out of `sip-map-army/packages/symbols/src/generated/warfighting.ts`
+— 927 catalog nodes, 16 structural, 911 drawable — which is `sip-map-army`'s own
+milsymbol-generated catalog. Those figures are correct for what they are and mislabelled
+by name.
+
+The distinction is not academic, and one check settles it: `sip-map-army` has **no arrow
+graphic at all**. `TACTICAL_GRAPHICS` holds eighteen rows, every one a plain path or a
+plain closed area with a label — phase line, LD, LC, FEBA, FSCL, objective, NAI, TAI,
+drop zone, landing zone — and no main attack, no direction of attack, no axis of advance.
+The word "arrow" does not appear anywhere in that repository. Its own docblock explains
+why:
+
+> "What is deliberately absent is everything needing a glyph of its own — a no-fire area's
+> diagonal and X, a minefield's mines, a fortification's teeth, an obstacle belt's zigzag.
+> Those are a second renderer, not another row, and approximating them would put a symbol
+> on a map other people read that is recognisable and wrong."
+
+So the arrow and the blue obstacle Xs seen in map.army cannot have come from
+`sip-map-army`. **Which of the two the coverage comparison should be against is a question
+for whoever asked for it** — the tables here are computed from the local repository, and
+renaming them is a one-line change in `MAP_ARMY_BASELINE` once that is settled. Numbers
+for the real map.army would have to come from gs-soft, not from this machine.
 
 ## The answer
 
@@ -175,7 +220,139 @@ Shareable URLs, for sending someone a specific corner of a specific standard:
 ?sample                                the map with a five-mark laydown
 ```
 
-## Drawing tactical graphics on the map
+## The point editor — the mechanism, not the geometry
+
+The geometry was right and the drawing still felt unlike map.army, and the answer was in
+map.army's own [Point Editor documentation](https://www.map.army/doc/en/symbols/point-editor/)
+rather than in any renderer. Quoted:
+
+> "New points are added with each click." … "Editing is terminated with the space bar or
+> the symbol is discarded with the Esc key." … "If this function is switched on, a new
+> point is inserted for the selected graphic each time you click on the map." … "If this
+> function is switched on, each time you click on a point in the marked graphic, it will
+> be removed."
+
+So the difference was never the shape. It was that **a placed graphic stays editable**:
+
+| | map.army | this demo, before | now |
+| --- | --- | --- | --- |
+| add points | click, click, click | same | same |
+| finish | **space** | double-click | space, and double-click still works |
+| discard | Esc | Esc | Esc |
+| after placing | drag handles, insert a point, delete a point | **delete the whole shape** | drag handles, insert, delete |
+
+A shape that can only be deleted and redrawn is a shape nobody adjusts — and for a
+conformant graphic whose anchor rule is not a path, one-shot drawing is almost never right
+first time. That was the real gap.
+
+![The point editor: numbered handles, and the toolbar acting on the selection](editor.png)
+
+- **Numbered handles** on the selected shape, orange because that is the one hue neither
+  the standard's palette nor the sketch palette uses — a handle is never mistaken for part
+  of a symbol. They are `maplibregl.Marker`s rather than a circle layer, because a layer
+  has no per-feature drag.
+- **Move** is the resting state: handles drag, and a click on the map still places marks.
+- **Add point** inserts into the **segment nearest the click**, not at the end. Appending
+  would make an add-point tool into an extend-line tool, and on a closed area it would put
+  the new point across the shape from where it was clicked.
+- **Remove point** turns each handle into a target and turns dragging off, so a click that
+  lands a pixel out deletes rather than nudges. It stops at the shape's own minimum: below
+  that the geometry returns nothing and the graphic would vanish with no way back.
+- The toolbar sits **under the map**, where map.army puts it, because these controls act on
+  the selection rather than on the application.
+
+One editor serves both drawing paths — a sketch and a conformant graphic both hold an
+array of `[lng, lat]`, and editing a point array has nothing to do with which of them is
+conformant. Dragging vertex 1 of a conformant axis moves its **arrowhead**, because that
+is what point 1 means under `AXIS2`; the panel lists the points so that is visible rather
+than surprising.
+
+`?select=sketch&edit=add` opens with the first sketch selected and the insert tool on.
+
+Five checks drive the editor through the store the way the toolbar does: a sketch is
+placed from its clicks, dragging moves that vertex and no other, an inserted point lands
+in the nearest segment (index 1, not appended), removing takes one out, and a shape
+refuses to go below its minimum.
+
+## Drawing them the way map.army does — the sketch path
+
+The **Sketch** tab is a second drawing tool, and it exists because the conformant one
+cannot behave the way an operator expects without ceasing to be conformant.
+
+`renderGraphic` hands vertices to mil-sym-ts and gets the standard's own geometry back.
+Its inputs are the standard's **anchor point rules**, and for most of the 67 in play the
+clicks are not the shape: an axis of advance wants its arrowhead first and a width point
+last, a corridor wants a distance modifier, a rectangle wants three points and an
+azimuth. Somebody who clicks the line they can see gets something else. That is not a bug
+in the renderer — it is a standard's input convention meeting a mouse.
+
+map.army does not have this problem because MSS owns both the geometry and the gesture.
+There is no code to borrow from a proprietary engine, so `src/sketch/` is the other way to
+get that behaviour: **click the path you can see, and it draws along it.**
+
+![The sketch palette and three sketches on the map](sketch.png)
+
+| | conformant path | sketch path |
+| --- | --- | --- |
+| geometry from | mil-sym-ts `WebRenderer` | `src/sketch/geometry.ts` |
+| clicks mean | whatever the anchor point rule says | the path, always |
+| Main attack | 4 clicks: tip, centre line, width point | **2+ clicks along the axis** |
+| ornament size | derived from the map scale, re-rendered on `zoomend` | pixels, constant by construction |
+| coordinates | longitude and latitude | anchors are geographic, everything else is screen space |
+| conformant? | **yes** | **no — approximations** |
+
+Nine graphics in four groups — offensive, defensive, obstacles, coordination — each one a
+shape whose construction is unambiguous: a line, an area, an arrow, or an ornament
+repeated along a path. Each palette entry names the 2525D entity it stands in for, so the
+same graphic can be drawn both ways and compared.
+
+### Screen space is the whole trick
+
+The overlay is one SVG over the map canvas, and it reprojects the graphic's vertices on
+every `render` frame. So an arrowhead is 22 pixels, the Xs of a wire obstacle are 26
+pixels apart, and a corridor is 16 pixels either side of its line — at every zoom, by
+construction rather than by arithmetic. There is no map scale to plumb through and nothing
+to get wrong at a zoom nobody tested.
+
+![The same wire obstacle at zoom 11 and zoom 13](sk-z11.png)
+
+![…the ornament unchanged while the scale bar goes from 3 km to 500 m](sk-z13.png)
+
+Two screenshots, four times the zoom, the same Xs.
+
+### What it costs, and why it is labelled everywhere
+
+These are **not conformant symbols**. `sip-map-army` refused to approximate this family
+and wrote down why, in `packages/symbols/src/graphics.ts`:
+
+> "What is deliberately absent is everything needing a glyph of its own — a no-fire area's
+> diagonal and X, a minefield's mines, a fortification's teeth, an obstacle belt's zigzag.
+> Those are a second renderer, not another row, and approximating them would put a symbol
+> on a map other people read that is recognisable and wrong."
+
+That warning applies to `src/sketch/` in full, so the demo makes the difference visible
+rather than arguing with it:
+
+- the palette leads with a banner saying what drew these;
+- the draw-hint bar repeats it while a sketch is in progress, and names the standard
+  entity being stood in for;
+- the properties panel repeats it again, because somebody who clicked a shape on the map
+  never saw the palette;
+- sketches are drawn in **maroon, green and blue** — one palette plainly outside the
+  standard's — so a glance separates them from the conformant graphics beside them;
+- they live in their own list in the store and are never merged with `graphics`, so
+  "is this conformant?" is a list to be in rather than a field to read.
+
+### Checked
+
+Five checks over the pure geometry, which is the part worth locking: the arrowhead lands
+within half a pixel of the final click; four times the pixels gives four times the Xs at
+the same step; an offset path stays parallel **and on the correct side** (screen y grows
+downward, and a sign error puts a fortified line's teeth on the wrong side of the ditch);
+trimming shortens a path by exactly the trim; and every one of the nine kinds draws
+something from its own minimum click count.
+
+## Drawing tactical graphics — the conformant path
 
 **Yes — and it is the renderer's geometry, not an approximation.** `WebRenderer.RenderSymbol`
 with `OUTPUT_FORMAT_GEOJSON` takes a SIDC and a list of `lng,lat` control points and
@@ -575,15 +752,20 @@ src/
     amplifiers.ts    the text amplifiers, keyed by the renderer's own constants
     renderSymbol.ts  SIDC + amplifiers -> { svg, width, height, anchorX, anchorY }
     renderGraphic.ts SIDC + vertices -> styled GeoJSON (the multipoint path)
+  sketch/            graphics this project draws itself, in screen space — NOT conformant
+    geometry.ts      pure pixel geometry: arrows, corridors, ornaments along a path
+    kinds.ts         the palette: nine shapes, each naming the entity it stands in for
+    useSketchOverlay.ts  one SVG over the map, reprojected every frame
   map/
     markerOffset.ts  the anchor arithmetic (ported unchanged) and the camera scale
+    useVertexHandles.ts  draggable numbered handles on the selected shape
     useMilsymMarkers.ts  the reconciler: created once per id, then patched
     useGraphicOverlay.ts one GeoJSON source, fill/line layers, labels as markers
   state/
     useDemoStore.ts  marks, selection, draft. In memory; a reload loses them, on purpose
   components/        the browser, the gallery, the coverage report, the panel, the map
 scripts/
-  smoke-browser.ts   the 45 checks
+  smoke-browser.ts   the 57 checks
   smoke.mjs          the driver
   gen-map-army-fixture.mjs  rebuilds the fixture from a sip-map-army checkout
   gen-draw-rules.mjs        extracts the 89 anchor-point rules from the library

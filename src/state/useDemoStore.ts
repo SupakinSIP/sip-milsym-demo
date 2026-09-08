@@ -9,6 +9,8 @@ import {
   type Amplifiers,
   type SidcFields,
 } from "../symbology/index.js";
+import { orderPointsForRule } from "../symbology/renderGraphic.js";
+import { sketchKindOf } from "../sketch/kinds.js";
 
 /**
  * Everything the demo knows, held in memory for as long as the tab is open.
@@ -151,6 +153,69 @@ export interface DemoState {
   selectGraphic: (id: string | null) => void;
   updateGraphicAmplifier: (id: string, key: string, value: string) => void;
   deleteGraphic: (id: string) => void;
+
+  /* ------------------------------------------------- sketches */
+
+  sketches: PlacedSketch[];
+  sketching: { kindId: string; label: string; points: [number, number][] } | null;
+  selectedSketchId: string | null;
+
+  startSketch: (kindId: string) => void;
+  addSketchPoint: (lng: number, lat: number) => void;
+  finishSketch: () => void;
+  cancelSketch: () => void;
+  selectSketch: (id: string | null) => void;
+  setSketchLabel: (id: string, label: string) => void;
+  deleteSketch: (id: string) => void;
+
+  /* ------------------------------------------------- editing a placed shape */
+
+  /**
+   * What a click on the map does to the **selected** shape.
+   *
+   * map.army's model, from its own Point Editor documentation: a placed multipoint
+   * graphic stays editable, and three modes decide what the next click means — drag a
+   * handle, insert a point, or delete the one clicked. That persistent editability is the
+   * part of the mechanism this demo was missing, not the geometry: a shape that can only
+   * be deleted and redrawn is a shape nobody adjusts.
+   *
+   * "move" is the resting state and does not consume map clicks at all — the handles are
+   * draggable markers, so dragging is always available.
+   */
+  editMode: "move" | "add" | "remove";
+  setEditMode: (editMode: "move" | "add" | "remove") => void;
+
+  /** Move one vertex of whichever shape is selected. */
+  moveVertex: (index: number, lng: number, lat: number) => void;
+  /**
+   * Insert a vertex into the selected shape, splitting the segment nearest the click.
+   *
+   * Nearest **segment**, not appended to the end: inserting at the end of a closed area
+   * would put the new point across the shape from where it was clicked, and inserting at
+   * the end of a line would make an add-point tool into an extend-line tool. The segment
+   * is chosen by perpendicular distance in degrees, which is close enough at the scale a
+   * hand-clicked graphic spans.
+   */
+  insertVertex: (lng: number, lat: number) => void;
+  /** Remove one vertex, unless the shape needs it to stay drawable. */
+  removeVertex: (index: number) => void;
+}
+
+/**
+ * A graphic this project drew itself, rather than the standard's renderer.
+ *
+ * Kept in its own list beside `graphics`, never merged with it, because the two are
+ * different claims about the same map: a `PlacedGraphic` is MIL-STD-2525 geometry from
+ * mil-sym-ts, and a `PlacedSketch` is an approximation drawn by `src/sketch`. Merging
+ * them would make "is this symbol conformant?" a field to read instead of a list to be in.
+ */
+export interface PlacedSketch {
+  id: string;
+  /** Which row of `SKETCH_KINDS`. */
+  kindId: string;
+  /** `[lng, lat]`, exactly as clicked — the path the operator can see. */
+  points: [number, number][];
+  label: string;
 }
 
 /**
@@ -233,7 +298,17 @@ const STARTING_BASIC_ID = "10121100";
 const SAMPLE_GRAPHICS: readonly {
   basicId: string;
   name: string;
+  /**
+   * In **clicked** order, exactly as an operator would put them down.
+   *
+   * Not the renderer order: the sample goes through `orderPointsForRule` on the way in,
+   * the same as a shape drawn on the map, so the data here has one convention and the
+   * translation has one place. A sample written in renderer order would be the only
+   * points in the project that skipped it.
+   */
   points: readonly (readonly [number, number])[];
+  /** The anchor point rule, so the reorder knows whether this is an axis graphic. */
+  drawRuleName: string;
   fields: Partial<SidcFields>;
   amplifiers: Amplifiers;
 }[] = [
@@ -245,6 +320,7 @@ const SAMPLE_GRAPHICS: readonly {
       [100.62, 13.93],
       [100.86, 13.98],
     ],
+    drawRuleName: "LINE7",
     fields: {},
     amplifiers: { T_UNIQUE_DESIGNATION_1: "2 BCT", T2_UNIQUE_DESIGNATION_3: "3 BCT" },
   },
@@ -256,6 +332,7 @@ const SAMPLE_GRAPHICS: readonly {
       [100.55, 13.7],
       [100.82, 13.64],
     ],
+    drawRuleName: "LINE2",
     fields: {},
     amplifiers: {},
   },
@@ -268,6 +345,7 @@ const SAMPLE_GRAPHICS: readonly {
       [100.8, 13.75],
       [100.68, 13.73],
     ],
+    drawRuleName: "AREA1",
     fields: {},
     // The renderer letters the word "OBJ" itself, so the designation is just the name.
     amplifiers: { T_UNIQUE_DESIGNATION_1: "FOX" },
@@ -281,6 +359,7 @@ const SAMPLE_GRAPHICS: readonly {
       [100.56, 13.44],
       [100.36, 13.42],
     ],
+    drawRuleName: "AREA1",
     fields: {},
     amplifiers: { T_UNIQUE_DESIGNATION_1: "BELT A" },
   },
@@ -299,12 +378,15 @@ const SAMPLE_GRAPHICS: readonly {
     // along leg one instead. Here leg one is about 17 km and the half width about 1 km.
     basicId: "25151403",
     name: "Main Attack",
+    // Clicked order: rear, mid, arrowhead, then the width point. `orderPointsForRule`
+    // turns this into the tip-first order AXIS2 wants.
     points: [
-      [100.70, 13.63],
-      [100.54, 13.66],
       [100.36, 13.62],
-      [100.70, 13.64],
+      [100.54, 13.66],
+      [100.7, 13.63],
+      [100.7, 13.64],
     ],
+    drawRuleName: "AXIS2",
     fields: {},
     amplifiers: {},
   },
@@ -325,6 +407,7 @@ const SAMPLE_GRAPHICS: readonly {
       [100.3, 13.52],
       [100.62, 13.56],
     ],
+    drawRuleName: "LINE1",
     fields: {},
     amplifiers: {},
   },
@@ -337,8 +420,51 @@ const SAMPLE_GRAPHICS: readonly {
       [100.9, 13.5],
       [101.02, 13.62],
     ],
+    drawRuleName: "CORRIDOR1",
     fields: {},
     amplifiers: { T_UNIQUE_DESIGNATION_1: "AC ONE" },
+  },
+];
+
+/**
+ * Sketches for the sample laydown, drawn beside their conformant counterparts.
+ *
+ * Deliberately over the same ground as the standard graphics above: the point of having
+ * both in one laydown is that the difference is visible in one screenshot — the sketch
+ * follows the clicked path with a constant-size ornament, the conformant one is the
+ * standards artwork with the standards anchor rules.
+ */
+const SAMPLE_SKETCHES: readonly {
+  kindId: string;
+  label: string;
+  points: readonly (readonly [number, number])[];
+}[] = [
+  {
+    kindId: "main-attack",
+    label: "",
+    points: [
+      [100.34, 13.44],
+      [100.5, 13.47],
+      [100.68, 13.44],
+    ],
+  },
+  {
+    kindId: "wire-obstacle",
+    label: "",
+    points: [
+      [100.3, 13.9],
+      [100.55, 13.87],
+      [100.82, 13.91],
+    ],
+  },
+  {
+    kindId: "flot",
+    label: "",
+    points: [
+      [100.3, 13.34],
+      [100.56, 13.31],
+      [100.8, 13.35],
+    ],
   },
 ];
 
@@ -353,6 +479,97 @@ let nextId = 1;
  */
 export function draftSidc(draft: Draft): string {
   return composeSidc(draft.basicId, draft.fields);
+}
+
+
+/**
+ * Whichever multipoint shape is selected, edited through one function.
+ *
+ * A sketch and a conformant graphic hold the same thing — an array of `[lng, lat]` — so
+ * the vertex operations are written once and dispatch on which list holds the selection.
+ * Keeping the lists separate is still right (one is conformant symbology and the other is
+ * not), but the *editing* of a point array has nothing to do with that distinction.
+ */
+function editPoints(
+  state: DemoState,
+  change: (points: [number, number][]) => [number, number][],
+): Partial<DemoState> {
+  if (state.selectedSketchId) {
+    return {
+      sketches: state.sketches.map((sketch) =>
+        sketch.id === state.selectedSketchId
+          ? { ...sketch, points: change(sketch.points) }
+          : sketch,
+      ),
+    };
+  }
+  if (state.selectedGraphicId) {
+    return {
+      graphics: state.graphics.map((graphic) =>
+        graphic.id === state.selectedGraphicId
+          ? { ...graphic, points: change(graphic.points) }
+          : graphic,
+      ),
+    };
+  }
+  return {};
+}
+
+/**
+ * How few points the selected shape can be reduced to and still draw.
+ *
+ * For a sketch it is the palette row's own minimum. For a conformant graphic it is two,
+ * which is a floor rather than the real answer: the true minimum is the entity's
+ * `minPointCount`, and that lives on the catalog entry rather than on the placed shape.
+ * Understating it means the renderer may refuse a geometry the editor allowed — visible
+ * as the refusal banner in the panel, which is the right place for it to surface and is
+ * why understating is acceptable here.
+ */
+function minimumPointsFor(state: DemoState): number {
+  if (state.selectedSketchId) {
+    const sketch = state.sketches.find((s) => s.id === state.selectedSketchId);
+    return sketchKindOf(sketch?.kindId ?? "")?.minPoints ?? 2;
+  }
+  return 2;
+}
+
+/**
+ * The index of the segment whose line passes nearest the click.
+ *
+ * Returns the index of the segment's **first** point, so the caller inserts after it.
+ * Distance is measured to the segment rather than to its infinite line — a click beyond
+ * the end of a segment belongs to whichever end it is near, not to the segment that
+ * happens to point at it.
+ */
+function nearestSegment(
+  points: readonly (readonly [number, number])[],
+  at: readonly [number, number],
+): number {
+  let best = 0;
+  let bestDistance = Infinity;
+  for (let i = 0; i < points.length - 1; i++) {
+    const [ax, ay] = points[i]!;
+    const [bx, by] = points[i + 1]!;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    const t =
+      lengthSquared === 0
+        ? 0
+        : Math.max(
+            0,
+            Math.min(
+              1,
+              ((at[0] - ax) * dx + (at[1] - ay) * dy) / lengthSquared,
+            ),
+          );
+    const distance = Math.hypot(at[0] - (ax + t * dx), at[1] - (ay + t * dy));
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = i;
+    }
+  }
+  return best;
 }
 
 export const useDemoStore = create<DemoState>((set, get) => ({
@@ -485,6 +702,9 @@ export const useDemoStore = create<DemoState>((set, get) => ({
       graphics: [],
       selectedGraphicId: null,
       drawing: null,
+      sketches: [],
+      selectedSketchId: null,
+      sketching: null,
     }),
 
   /* ------------------------------------------------- tactical graphics */
@@ -525,7 +745,11 @@ export const useDemoStore = create<DemoState>((set, get) => ({
               id,
               sidc: drawing.sidc,
               name: drawing.name,
-              points,
+              // Clicks in, the standard order out. See orderPointsForRule: an axis
+              // graphic is clicked rear-to-arrowhead and stored tip-first.
+              points: orderPointsForRule(drawing.drawRuleName, points).map(
+                ([lng, lat]) => [lng, lat] as [number, number],
+              ),
               amplifiers: {},
             },
           ],
@@ -553,7 +777,9 @@ export const useDemoStore = create<DemoState>((set, get) => ({
             id,
             sidc: drawing.sidc,
             name: drawing.name,
-            points: drawing.points,
+            points: orderPointsForRule(drawing.drawRuleName, drawing.points).map(
+              ([lng, lat]) => [lng, lat] as [number, number],
+            ),
             amplifiers: {},
           },
         ],
@@ -583,6 +809,124 @@ export const useDemoStore = create<DemoState>((set, get) => ({
         state.selectedGraphicId === id ? null : state.selectedGraphicId,
     })),
 
+  /* ------------------------------------------------- sketches */
+
+  sketches: [],
+  sketching: null,
+  selectedSketchId: null,
+
+  startSketch: (kindId) =>
+    set({
+      sketching: { kindId, label: "", points: [] },
+      // One subject at a time, and starting a sketch cancels a conformant shape in
+      // progress: two drawing tools listening to the same click is a tool that guesses.
+      drawing: null,
+      selectedId: null,
+      selectedGraphicId: null,
+      selectedSketchId: null,
+    }),
+
+  addSketchPoint: (lng, lat) =>
+    set((state) =>
+      state.sketching
+        ? {
+            sketching: {
+              ...state.sketching,
+              points: [...state.sketching.points, [lng, lat]],
+            },
+          }
+        : {},
+    ),
+
+  finishSketch: () =>
+    set((state) => {
+      const sketching = state.sketching;
+      if (!sketching) {
+        return {};
+      }
+      const kind = sketchKindOf(sketching.kindId);
+      if (!kind || sketching.points.length < kind.minPoints) {
+        // A no-op rather than a discard, same as the conformant tool: the operator
+        // double-clicked early and their points are worth more than the gesture.
+        return {};
+      }
+      const id = `sketch-${nextId++}`;
+      return {
+        sketching: null,
+        sketches: [
+          ...state.sketches,
+          {
+            id,
+            kindId: sketching.kindId,
+            // **As clicked.** No reordering, no width point, no anchor rule — that is the
+            // whole difference between this path and the conformant one.
+            points: sketching.points,
+            label: sketching.label,
+          },
+        ],
+        selectedSketchId: id,
+      };
+    }),
+
+  cancelSketch: () => set({ sketching: null }),
+
+  selectSketch: (id) =>
+    set({ selectedSketchId: id, selectedId: null, selectedGraphicId: null }),
+
+  setSketchLabel: (id, label) =>
+    set((state) => ({
+      sketches: state.sketches.map((sketch) =>
+        sketch.id === id ? { ...sketch, label } : sketch,
+      ),
+    })),
+
+  deleteSketch: (id) =>
+    set((state) => ({
+      sketches: state.sketches.filter((sketch) => sketch.id !== id),
+      selectedSketchId:
+        state.selectedSketchId === id ? null : state.selectedSketchId,
+    })),
+
+  /* ------------------------------------------------- editing a placed shape */
+
+  editMode: "move",
+  setEditMode: (editMode) => set({ editMode }),
+
+  moveVertex: (index, lng, lat) =>
+    set((state) => editPoints(state, (points) =>
+      points.map((point, i) =>
+        i === index ? ([lng, lat] as [number, number]) : point,
+      ),
+    )),
+
+  insertVertex: (lng, lat) =>
+    set((state) =>
+      editPoints(state, (points) => {
+        if (points.length < 2) {
+          return [...points, [lng, lat]];
+        }
+        const at = nearestSegment(points, [lng, lat]);
+        const next = [...points];
+        next.splice(at + 1, 0, [lng, lat]);
+        return next;
+      }),
+    ),
+
+  removeVertex: (index) =>
+    set((state) =>
+      editPoints(state, (points) => {
+        const floor = minimumPointsFor(state);
+        if (points.length <= floor) {
+          // A no-op rather than a shape that stops drawing. The renderer refuses a
+          // geometry below its minimum and the sketch geometry returns nothing, so
+          // removing the last permitted point would make the graphic silently vanish
+          // and leave the operator with an empty selection they cannot undo.
+          return points;
+        }
+        return points.filter((_, i) => i !== index);
+      }),
+    ),
+
   seedSample: () =>
     set((state) => ({
       graphics: SAMPLE_GRAPHICS.map((sample) => ({
@@ -593,11 +937,24 @@ export const useDemoStore = create<DemoState>((set, get) => ({
           ...sample.fields,
         }),
         name: sample.name,
-        points: sample.points.map(([lng, lat]) => [lng, lat] as [number, number]),
+        points: orderPointsForRule(sample.drawRuleName, sample.points).map(
+          ([lng, lat]) => [lng, lat] as [number, number],
+        ),
         amplifiers: { ...sample.amplifiers },
       })),
       selectedGraphicId: null,
       drawing: null,
+      // The sketches go down beside the conformant graphics on purpose: the whole value
+      // of having both paths in one application is being able to see the difference in
+      // one screen without switching anything.
+      sketches: SAMPLE_SKETCHES.map((sample) => ({
+        id: `sketch-${nextId++}`,
+        kindId: sample.kindId,
+        points: sample.points.map(([lng, lat]) => [lng, lat] as [number, number]),
+        label: sample.label,
+      })),
+      selectedSketchId: null,
+      sketching: null,
       symbols: SAMPLE.map((sample) => ({
         id: `mark-${nextId++}`,
         // The draft's version, so the sample is drawn under whichever standard is

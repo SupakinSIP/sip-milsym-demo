@@ -1055,3 +1055,161 @@ button.danger {
   text-overflow: ellipsis;
   max-width: 100%;
 }
+
+/* ==========================================================================
+ * The sketch layer: graphics this project draws itself, in screen space.
+ *
+ * One SVG over the map canvas, reprojected every frame — so an arrowhead is 22px and the
+ * Xs of a wire obstacle are 26px apart at every zoom, by construction rather than by
+ * arithmetic. `pointer-events: none` because selection goes through the palette and the
+ * panel; a click on the map belongs to the drawing tool.
+ * ========================================================================== */
+
+.sketch-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.sketch-layer path {
+  /* Literal ink for the reason the marker rules give: drawn over base-map tiles, which
+   * are light in every scheme this demo offers. */
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.9));
+}
+
+.sketch-layer__label {
+  font:
+    700 12px "Segoe UI",
+    system-ui,
+    sans-serif;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 3px;
+}
+
+.drawhint--sketch {
+  background: #2b1f2c;
+}
+
+/* ----------------------------------------------------------------- the palette */
+
+.spal__list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.spal__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: 5px 3px;
+  text-align: center;
+}
+
+.spal__item--on {
+  border-color: var(--accent);
+  background: #1d2c3c;
+}
+
+/* The preview is drawn by the same geometry that draws the shape on the map, so a light
+ * ground here for the same reason the symbol preview has one: these are map graphics. */
+.spal__preview {
+  display: block;
+  border-radius: 3px;
+  background: #d9d5cd;
+}
+
+.spal__label {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.spal__pts {
+  color: #5c6b7a;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 8px;
+}
+
+/* ==========================================================================
+ * The point editor: draggable handles and the toolbar that acts on them.
+ *
+ * map.army's model — a placed multipoint shape stays editable, with handles you drag and
+ * modes that insert or delete a point. Orange because that is the one hue neither the
+ * standard's palette nor the sketch palette uses, so a handle is never mistaken for part
+ * of a symbol.
+ * ========================================================================== */
+
+.vhandle {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid #ffffff;
+  border-radius: 50%;
+  background: #e07a1f;
+  color: #ffffff;
+  font:
+    700 8px/1 ui-monospace,
+    Consolas,
+    monospace;
+  cursor: grab;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.vhandle:active {
+  cursor: grabbing;
+}
+
+/* Remove mode: the handle is a target, not something to drag, and it says so. */
+.vhandle--remove {
+  background: #c0392b;
+  cursor: crosshair;
+}
+
+.edittools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 11px;
+}
+
+.edittools__name {
+  font-weight: 600;
+}
+
+.edittools__count {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.edittools__modes {
+  display: flex;
+  gap: 2px;
+}
+
+.edittools__modes .tab {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.edittools__modes .tab--on {
+  border-color: var(--accent);
+}
+
+.edittools__hint {
+  margin-left: auto;
+  color: var(--ink-dim);
+}

@@ -1,12 +1,17 @@
 import { drawRuleTextOf } from "../symbology/index.js";
-import { axisWidthCheck } from "../symbology/renderGraphic.js";
+import {
+  axisWidthCheck,
+  orderPointsForRule,
+} from "../symbology/renderGraphic.js";
+import { sketchKindOf } from "../sketch/kinds.js";
 import { useDemoStore } from "../state/useDemoStore.js";
 
 /**
  * What the click about to be made means, for the rules where it is not a path.
  *
- * Only the two axis rules, and only because their point order was **measured** — the
- * arrowhead at point 1, the centre line running back from it, the last point a width.
+ * Only the two axis rules, and only because their point order was **measured**. They are
+ * labelled in the order an operator naturally clicks — rear, along the axis, then a width
+ * — and `orderPointsForRule` turns that into the tip-first order the rule actually wants.
  * Every other rule shows the standard's own text instead of a label invented here: a
  * per-click label is a claim about geometry, and there are 67 rules to be wrong about.
  */
@@ -18,13 +23,16 @@ function clickLabel(
   if (!ruleName.startsWith("AXIS")) {
     return null;
   }
+  // The **clicked** order, which is the natural one: an attack arrow is drawn from where
+  // you are toward the objective. `orderPointsForRule` flips it into the tip-first order the
+  // rule wants on the way to the renderer, so the operator never has to click backwards.
   if (index === 0) {
-    return "the tip of the arrowhead";
+    return "the rear of the axis — where the attack starts";
   }
   if (index < minPoints - 1) {
-    return "the centre line, running back from the tip";
+    return "along the axis, toward the objective";
   }
-  return "the width — offset perpendicular from the tip";
+  return "the width — one click off the arrowhead, perpendicular to the axis";
 }
 
 /**
@@ -52,11 +60,63 @@ function clickLabel(
  * library's declarations, never paraphrased, because a paraphrased anchor rule is a guess
  * about geometry.
  */
+/**
+ * The sketch tool's own bar.
+ *
+ * Deliberately shorter than the conformant one, and the brevity is the point: there is no
+ * anchor point rule to explain because the clicks *are* the shape. If this bar ever needs
+ * a paragraph of instruction, the sketch geometry has stopped being what it claims to be.
+ */
+function SketchHint(): React.JSX.Element | null {
+  const sketching = useDemoStore((s) => s.sketching);
+  const finishSketch = useDemoStore((s) => s.finishSketch);
+  const cancelSketch = useDemoStore((s) => s.cancelSketch);
+  if (!sketching) {
+    return null;
+  }
+  const kind = sketchKindOf(sketching.kindId);
+  if (!kind) {
+    return null;
+  }
+  const have = sketching.points.length;
+  const enough = have >= kind.minPoints;
+  return (
+    <div className="drawhint drawhint--sketch" role="status">
+      <div className="drawhint__row">
+        <span className="drawhint__name">{kind.label}</span>
+        <span className="drawhint__geom">sketch</span>
+        <span className="drawhint__count">
+          {have} point{have === 1 ? "" : "s"}
+        </span>
+        <span className="drawhint__how">
+          {enough
+            ? "click to extend · space to finish"
+            : `click ${kind.minPoints - have} more along the path`}
+        </span>
+        <button type="button" onClick={finishSketch} disabled={!enough}>
+          Finish
+        </button>
+        <button type="button" className="link" onClick={cancelSketch}>
+          Discard (Esc)
+        </button>
+      </div>
+      <p className="drawhint__anchors">
+        Drawn by <code>src/sketch</code> along the clicked path — not conformant
+        MIL-STD-2525 geometry. Stands in for <strong>{kind.standardEntity}</strong>.
+      </p>
+    </div>
+  );
+}
+
 export function DrawHintBar(): React.JSX.Element | null {
   const drawing = useDemoStore((s) => s.drawing);
+  const sketching = useDemoStore((s) => s.sketching);
   const finishDrawing = useDemoStore((s) => s.finishDrawing);
   const cancelDrawing = useDemoStore((s) => s.cancelDrawing);
 
+  if (sketching) {
+    return <SketchHint />;
+  }
   if (!drawing) {
     return null;
   }
@@ -71,7 +131,13 @@ export function DrawHintBar(): React.JSX.Element | null {
   // Checked while drawing, not after: once the width point is placed too far out the
   // renderer throws the centre line away, and an arrow drawn from a discarded path is
   // not obviously wrong on screen — it is just a thin wedge somewhere else.
-  const width = axisWidthCheck(drawing.drawRuleName, drawing.points);
+  // Against the **reordered** points, or the check measures the wrong leg: the renderer
+  // takes the perpendicular from the width point to the line out of the *tip*, and in
+  // clicked order the first point is the rear.
+  const width = axisWidthCheck(
+    drawing.drawRuleName,
+    orderPointsForRule(drawing.drawRuleName, drawing.points),
+  );
 
   return (
     <div className="drawhint" role="status">
@@ -94,7 +160,7 @@ export function DrawHintBar(): React.JSX.Element | null {
             : enough
               ? capped && have >= drawing.maxPoints
                 ? "complete"
-                : "click to add more · double-click to finish"
+                : "click to add more · space to finish"
               : `click ${drawing.minPoints - have} more`}
         </span>
         <button
@@ -110,7 +176,7 @@ export function DrawHintBar(): React.JSX.Element | null {
           Finish
         </button>
         <button type="button" className="link" onClick={cancelDrawing}>
-          Cancel (Esc)
+          Discard (Esc)
         </button>
       </div>
       {width?.collapses ? (
@@ -126,6 +192,13 @@ export function DrawHintBar(): React.JSX.Element | null {
         <p className="drawhint__anchors">
           <strong>{drawing.drawRuleName}:</strong> {rule.anchorPoints}
           {rule.orientation !== "" ? ` ${rule.orientation}` : ""}
+          {drawing.drawRuleName.startsWith("AXIS") ? (
+            <em>
+              {" "}
+              These clicks are collected rear-first and reordered into that convention
+              before rendering.
+            </em>
+          ) : null}
         </p>
       ) : (
         <p className="drawhint__anchors">

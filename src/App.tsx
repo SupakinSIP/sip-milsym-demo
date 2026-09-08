@@ -7,6 +7,8 @@ import { PropertiesPanel } from "./components/PropertiesPanel.js";
 import { CoveragePanel } from "./components/CoveragePanel.js";
 import { GalleryView } from "./components/GalleryView.js";
 import { DrawHintBar } from "./components/DrawHintBar.js";
+import { SketchPalette } from "./components/SketchPalette.js";
+import { EditToolbar } from "./components/EditToolbar.js";
 
 /**
  * The demo, three panels wide: pick a symbol, place it, edit it.
@@ -67,11 +69,10 @@ export function App(): React.JSX.Element {
       ? "gallery"
       : "map",
   );
-  const [rail, setRail] = useState<"browse" | "coverage">(() =>
-    new URLSearchParams(window.location.search).get("rail") === "coverage"
-      ? "coverage"
-      : "browse",
-  );
+  const [rail, setRail] = useState<"browse" | "sketch" | "coverage">(() => {
+    const asked = new URLSearchParams(window.location.search).get("rail");
+    return asked === "coverage" || asked === "sketch" ? asked : "browse";
+  });
   const placing = useDemoStore((s) => s.placing);
   const outline = useDemoStore((s) => s.outline);
   const showAnchors = useDemoStore((s) => s.showAnchors);
@@ -87,8 +88,45 @@ export function App(): React.JSX.Element {
   // without a click — and it is useful for the same reason a person wants it: sending
   // someone a link that already shows something.
   useEffect(() => {
-    if (ready && new URLSearchParams(window.location.search).has("sample")) {
+    if (!ready) {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("sample")) {
       seedSample();
+    }
+    /**
+     * `?select=sketch-3` or `?select=graphic-2` opens with that shape selected and its
+     * point editor showing.
+     *
+     * The same justification as the other parameters: a link to a shape is how somebody
+     * says "look at this one" — and it is the only way a headless browser can photograph
+     * the editing handles, which cannot be reached without a click.
+     */
+    const select = params.get("select");
+    if (select) {
+      const state = useDemoStore.getState();
+      // `sketch` and `graphic` select the first of that kind, which is what a person
+      // sharing a link can actually write; the full id works too, for a specific one.
+      if (select === "sketch") {
+        const first = state.sketches[0];
+        if (first) {
+          state.selectSketch(first.id);
+        }
+      } else if (select === "graphic") {
+        const first = state.graphics[0];
+        if (first) {
+          state.selectGraphic(first.id);
+        }
+      } else if (select.startsWith("sketch-")) {
+        state.selectSketch(select);
+      } else if (select.startsWith("graphic-")) {
+        state.selectGraphic(select);
+      }
+    }
+    const mode = params.get("edit");
+    if (mode === "add" || mode === "remove") {
+      useDemoStore.getState().setEditMode(mode);
     }
   }, [ready, seedSample]);
 
@@ -211,17 +249,32 @@ export function App(): React.JSX.Element {
             </button>
             <button
               type="button"
+              className={rail === "sketch" ? "tab tab--on" : "tab"}
+              onClick={() => setRail("sketch")}
+              title="Graphics drawn by this project — click the path you can see"
+            >
+              Sketch
+            </button>
+            <button
+              type="button"
               className={rail === "coverage" ? "tab tab--on" : "tab"}
               onClick={() => setRail("coverage")}
             >
               Coverage
             </button>
           </nav>
-          {rail === "browse" ? <SymbolBrowser /> : <CoveragePanel />}
+          {rail === "browse" ? (
+            <SymbolBrowser />
+          ) : rail === "sketch" ? (
+            <SketchPalette />
+          ) : (
+            <CoveragePanel />
+          )}
         </aside>
         <div className="mapcol">
           <DrawHintBar />
           <MapView basemap={basemap} />
+          <EditToolbar />
         </div>
         <aside className="rail rail--right">
           <PropertiesPanel />

@@ -5,6 +5,8 @@ import { useDemoStore } from "../state/useDemoStore.js";
 import { useMilsymMarkers } from "../map/useMilsymMarkers.js";
 import { useGraphicOverlay } from "../map/useGraphicOverlay.js";
 import { scaleForCamera } from "../map/markerOffset.js";
+import { useSketchOverlay } from "../sketch/useSketchOverlay.js";
+import { useVertexHandles } from "../map/useVertexHandles.js";
 
 /**
  * The map the symbols are drawn on.
@@ -44,6 +46,28 @@ export type BasemapId = "liberty" | "plain";
 /** Bangkok and the upper gulf — somewhere with coastline, so a symbol has context. */
 const START = { center: [100.52, 13.74] as [number, number], zoom: 8 };
 
+/**
+ * The opening camera, overridable from the URL as `?z=12&at=100.5,13.7`.
+ *
+ * Same justification as `?sample` and `?rail`: this is a demo whose whole job is to be
+ * looked at, and "look at this at that zoom" is the most common thing anyone needs to
+ * say about it. It is also the only way a headless browser can photograph the same
+ * graphics at three zoom levels, which is how the screen-space ornament was proved
+ * constant.
+ */
+function cameraFromUrl(): { center: [number, number]; zoom: number } {
+  const params = new URLSearchParams(window.location.search);
+  const zoom = Number(params.get("z"));
+  const at = (params.get("at") ?? "").split(",").map(Number);
+  return {
+    center:
+      at.length === 2 && at.every((n) => Number.isFinite(n))
+        ? [at[0]!, at[1]!]
+        : START.center,
+    zoom: Number.isFinite(zoom) && zoom >= 1 && zoom <= 22 ? zoom : START.zoom,
+  };
+}
+
 export function MapView({ basemap }: { basemap: BasemapId }): React.JSX.Element {
   const container = useRef<HTMLDivElement | null>(null);
   const [map, setMap] = useState<MlMap | null>(null);
@@ -57,8 +81,8 @@ export function MapView({ basemap }: { basemap: BasemapId }): React.JSX.Element 
     const instance = new maplibregl.Map({
       container: container.current,
       style: basemap === "liberty" ? LIBERTY_STYLE_URL : PLAIN_STYLE,
-      center: START.center,
-      zoom: START.zoom,
+      center: cameraFromUrl().center,
+      zoom: cameraFromUrl().zoom,
       // The demo's whole point is a symbol standing on a coordinate, and the anchor
       // arithmetic is what puts it there — so the pitch control is on and the leader
       // line has something to do.
@@ -73,8 +97,21 @@ export function MapView({ basemap }: { basemap: BasemapId }): React.JSX.Element 
     // a graphic never reaches here — those handlers stop it.
     instance.on("click", (event) => {
       const store = useDemoStore.getState();
+      if (store.sketching) {
+        store.addSketchPoint(event.lngLat.lng, event.lngLat.lat);
+        return;
+      }
       if (store.drawing) {
         store.addDrawingPoint(event.lngLat.lng, event.lngLat.lat);
+        return;
+      }
+      // Editing a placed shape takes precedence over placing a new mark: the operator
+      // has something selected and has switched the tool on, so a click is an edit.
+      if (
+        store.editMode === "add" &&
+        (store.selectedSketchId || store.selectedGraphicId)
+      ) {
+        store.insertVertex(event.lngLat.lng, event.lngLat.lat);
         return;
       }
       if (store.placing) {
@@ -89,6 +126,11 @@ export function MapView({ basemap }: { basemap: BasemapId }): React.JSX.Element 
     // suppressed while drawing and restored after.
     instance.on("dblclick", (event) => {
       const store = useDemoStore.getState();
+      if (store.sketching) {
+        event.preventDefault();
+        store.finishSketch();
+        return;
+      }
       if (store.drawing) {
         event.preventDefault();
         store.finishDrawing();
@@ -152,13 +194,53 @@ export function MapView({ basemap }: { basemap: BasemapId }): React.JSX.Element 
 
   useMilsymMarkers(map, ready);
   useGraphicOverlay(map, ready);
+  useSketchOverlay(map, ready);
+  useVertexHandles(map, ready);
 
-  // Escape cancels a shape in progress. On the window rather than the canvas, because the
-  // operator may well have the cursor over a panel when they change their mind.
+  /**
+   * The keyboard: **space finishes a shape, Escape discards it**, and Escape also leaves
+   * an editing mode.
+   *
+   * Those are map.army's keys, from its Point Editor documentation — "Editing is
+   * terminated with the space bar or the symbol is discarded with the Esc key" — and they
+   * are better than the double-click this demo had. A double-click has to fight the map's
+   * own zoom, cannot be pressed while the cursor is somewhere useful, and gives no way to
+   * say "discard" rather than "finish". Double-click still works, because muscle memory
+   * from every other drawing tool expects it.
+   *
+   * On the window rather than the canvas: the operator may well have the cursor over a
+   * panel when they decide the shape is done.
+   */
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && useDemoStore.getState().drawing) {
-        useDemoStore.getState().cancelDrawing();
+      const store = useDemoStore.getState();
+      const typing =
+        event.target instanceof HTMLElement &&
+        ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName);
+      if (typing) {
+        return;
+      }
+      if (event.key === " ") {
+        if (store.sketching) {
+          event.preventDefault();
+          store.finishSketch();
+        } else if (store.drawing) {
+          event.preventDefault();
+          store.finishDrawing();
+        } else if (store.editMode !== "move") {
+          event.preventDefault();
+          store.setEditMode("move");
+        }
+        return;
+      }
+      if (event.key === "Escape") {
+        if (store.sketching) {
+          store.cancelSketch();
+        } else if (store.drawing) {
+          store.cancelDrawing();
+        } else if (store.editMode !== "move") {
+          store.setEditMode("move");
+        }
       }
     };
     window.addEventListener("keydown", onKey);

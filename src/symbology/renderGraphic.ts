@@ -210,6 +210,38 @@ export function renderGraphic(
   return result;
 }
 
+/* ------------------------------------------------- clicks in, standard order out */
+
+/**
+ * The operator's clicks, reordered into the order the standard's rule expects.
+ *
+ * **The tool should bend to the operator's gesture, not the other way round.** An attack
+ * arrow is drawn the way it is fought: from where you are, toward the objective. The
+ * standard's `AXIS1`/`AXIS2` rule wants the opposite — point 1 is the *tip* of the
+ * arrowhead and the centre line runs backwards from it, with the last point a width. Both
+ * facts are true at once, so something has to translate, and asking the operator to click
+ * an arrow backwards is the wrong half to fix.
+ *
+ * So the drawing tool collects **rear → arrowhead, then one click for the width**, and
+ * this function hands the renderer `[arrowhead, …reversed middle…, rear, width]`.
+ *
+ * Everything else is passed through untouched. `AREA*` and most `LINE*` rules genuinely
+ * are "click the shape", and a rule this function does not name is a rule whose order has
+ * not been measured — passing it through is the only honest thing to do with it. See
+ * `drawRuleTextOf` for what the other 65 rules say about their own points.
+ */
+export function orderPointsForRule(
+  ruleName: string,
+  clicked: readonly (readonly [number, number])[],
+): readonly (readonly [number, number])[] {
+  if (!ruleName.startsWith("AXIS") || clicked.length < 3) {
+    return clicked;
+  }
+  const width = clicked[clicked.length - 1]!;
+  const path = clicked.slice(0, -1);
+  return [...path].reverse().concat([width]);
+}
+
 /* ------------------------------------------------- the axis rules and their trap */
 
 /**

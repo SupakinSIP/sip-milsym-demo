@@ -26,6 +26,7 @@ import {
 } from "../state/useDemoStore.js";
 import { SymbolSvg, SymbolSvgWithAnchor } from "./SymbolSvg.js";
 import { GraphicPanel } from "./GraphicPanel.js";
+import { SketchPanel } from "./SketchPanel.js";
 
 /**
  * The frame fields and the lettering, for whichever symbol is being worked on.
@@ -134,6 +135,9 @@ export function PropertiesPanel(): React.JSX.Element {
   const selectedGraphic = useDemoStore((s) =>
     s.graphics.find((g) => g.id === s.selectedGraphicId) ?? null,
   );
+  const selectedSketch = useDemoStore((s) =>
+    s.sketches.find((k) => k.id === s.selectedSketchId) ?? null,
+  );
   const selected = useDemoStore(selectedSymbolOf);
   const outline = useDemoStore((s) => s.outline);
   const showAnchors = useDemoStore((s) => s.showAnchors);
@@ -173,6 +177,9 @@ export function PropertiesPanel(): React.JSX.Element {
 
   if (selectedGraphic) {
     return <GraphicPanel graphic={selectedGraphic} />;
+  }
+  if (selectedSketch) {
+    return <SketchPanel sketch={selectedSketch} />;
   }
 
   const rendered = renderSymbol(sidc, {

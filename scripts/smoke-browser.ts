@@ -42,9 +42,19 @@ import {
 import { crosswalk } from "../src/symbology/crosswalk.js";
 import {
   axisWidthCheck,
+  orderPointsForRule,
   renderGraphic,
 } from "../src/symbology/renderGraphic.js";
 import { useDemoStore } from "../src/state/useDemoStore.js";
+import {
+  arrow,
+  obstacleX,
+  offsetPolyline,
+  polylineLength,
+  trimEnd,
+  type Pt,
+} from "../src/sketch/geometry.js";
+import { SKETCH_KINDS } from "../src/sketch/kinds.js";
 import { markerOffset, scaleForCamera } from "../src/map/markerOffset.js";
 
 const lines: string[] = [];
@@ -721,6 +731,238 @@ check(
   },
 );
 
+
+/* ------------------------------------------------- clicks in, standard order out */
+
+check(
+  // The tool bends to the gesture: an attack arrow is clicked from the rear toward the
+  // objective, and the reorder hands the renderer the tip-first order AXIS2 wants. Both
+  // orders must produce the same picture, or the translation is not a translation.
+  "clicking rear-first draws the same arrow as the standard's order",
+  (() => {
+    const clicked: [number, number][] = [
+      [100.36, 13.62],
+      [100.54, 13.66],
+      [100.7, 13.63],
+      [100.7, 13.64],
+    ];
+    const standard: [number, number][] = [
+      [100.7, 13.63],
+      [100.54, 13.66],
+      [100.36, 13.62],
+      [100.7, 13.64],
+    ];
+    const reordered = orderPointsForRule("AXIS2", clicked);
+    const same =
+      JSON.stringify(reordered) === JSON.stringify(standard.map((p) => p));
+    const drawn = renderGraphic(MAIN_ATTACK, reordered);
+    return same && drawn.ok;
+  })(),
+  { note: "reversed path, width point kept last" },
+);
+
+check(
+  // Everything that is genuinely a path is passed through untouched — reordering an area
+  // would turn its boundary inside out.
+  "a path rule is passed through unchanged",
+  (() => {
+    const points: [number, number][] = [
+      [100.4, 13.5],
+      [100.6, 13.55],
+      [100.6, 13.4],
+    ];
+    return (
+      JSON.stringify(orderPointsForRule("AREA1", points)) ===
+        JSON.stringify(points) &&
+      JSON.stringify(orderPointsForRule("LINE1", points)) ===
+        JSON.stringify(points)
+    );
+  })(),
+  { note: "AREA1 and LINE1 untouched" },
+);
+
+
+/* ------------------------------------------------- the sketch geometry */
+
+const SKETCH_PATH: Pt[] = [
+  { x: 20, y: 200 },
+  { x: 200, y: 120 },
+  { x: 420, y: 160 },
+];
+
+check(
+  // The whole promise of the sketch path: the head is where the operator stopped. The
+  // conformant path puts it at point 1 and needs a width point; this puts it at the last
+  // click and needs nothing.
+  "a sketch arrow's head is at the last clicked point",
+  (() => {
+    const drawn = arrow(SKETCH_PATH, { head: 20, headHalf: 10 });
+    if (drawn.fills.length !== 1) {
+      return false;
+    }
+    // The filled head's three points; the tip is the one nearest the last click.
+    const numbers = (drawn.fills[0]!.d.match(/-?\d+\.?\d*/g) ?? []).map(Number);
+    const tipX = numbers[0]!;
+    const tipY = numbers[1]!;
+    const last = SKETCH_PATH[SKETCH_PATH.length - 1]!;
+    return Math.hypot(tipX - last.x, tipY - last.y) < 0.5;
+  })(),
+  { note: "arrowhead tip within half a pixel of the final click" },
+);
+
+check(
+  // Screen space is the reason the ornament does not need a map scale: the same path
+  // scaled up tenfold gets ten times as many Xs at the same spacing, rather than the same
+  // number of bigger ones.
+  "a sketch ornament's spacing is fixed in pixels",
+  (() => {
+    const short = obstacleX(SKETCH_PATH, { step: 26 });
+    const long = obstacleX(
+      SKETCH_PATH.map((p) => ({ x: p.x * 4, y: p.y * 4 })),
+      { step: 26 },
+    );
+    // Two strokes per X.
+    const shortCount = short.strokes.length / 2;
+    const longCount = long.strokes.length / 2;
+    const ratio = longCount / shortCount;
+    return ratio > 3.5 && ratio < 4.5;
+  })(),
+  { note: "four times the pixels, four times the Xs, same step" },
+);
+
+check(
+  "offsetting a path keeps it parallel",
+  (() => {
+    const straight: Pt[] = [
+      { x: 0, y: 100 },
+      { x: 100, y: 100 },
+      { x: 200, y: 100 },
+    ];
+    // Positive offset is the side that appears to the *right* of the direction of
+    // travel, because screen y grows downward — see `normal`. Asserting the sign, not
+    // just the distance: this is what decides which side a fortified line's teeth face.
+    const right = offsetPolyline(straight, 12);
+    const left = offsetPolyline(straight, -12);
+    return (
+      right.every((p) => Math.abs(p.y - 112) < 0.01) &&
+      left.every((p) => Math.abs(p.y - 88) < 0.01)
+    );
+  })(),
+  { note: "a horizontal line offset ±12 sits at y±12, sign checked" },
+);
+
+check(
+  "trimming a path shortens it by exactly the trim",
+  (() => {
+    const before = polylineLength(SKETCH_PATH);
+    const after = polylineLength(trimEnd(SKETCH_PATH, 40));
+    return Math.abs(before - after - 40) < 0.01;
+  })(),
+  { before: Math.round(polylineLength(SKETCH_PATH)), trimmed: 40 },
+);
+
+check(
+  "every sketch kind draws from its own minimum",
+  SKETCH_KINDS.every((kind) => {
+    const points = SKETCH_PATH.slice(0, Math.max(kind.minPoints, 2));
+    const padded =
+      points.length < kind.minPoints
+        ? [...points, { x: 300, y: 300 }]
+        : points;
+    const drawn = kind.draw(
+      kind.closed ? [...padded, padded[0]!] : padded,
+      "A",
+    );
+    return drawn.strokes.length + drawn.fills.length > 0;
+  }),
+  { kinds: SKETCH_KINDS.length },
+);
+
+
+/* ------------------------------------------------- the point editor */
+
+/**
+ * The editing model, driven through the store the way the toolbar drives it.
+ *
+ * Worth checking here rather than by hand: these operate on "whichever shape is
+ * selected", which is the sort of dispatch that works for one list and silently does
+ * nothing for the other.
+ */
+const editing = (() => {
+  const store = useDemoStore.getState();
+  store.clearAll();
+  store.startSketch("main-attack");
+  store.addSketchPoint(100.3, 13.5);
+  store.addSketchPoint(100.5, 13.55);
+  store.addSketchPoint(100.7, 13.5);
+  store.finishSketch();
+
+  const id = useDemoStore.getState().selectedSketchId;
+  const pointsNow = (): readonly [number, number][] =>
+    useDemoStore.getState().sketches.find((k) => k.id === id)?.points ?? [];
+
+  const placed = pointsNow().length;
+
+  // Move the middle handle.
+  useDemoStore.getState().moveVertex(1, 100.52, 13.6);
+  const moved = pointsNow()[1];
+
+  // Insert near the first segment; it must land between points 1 and 2, not at the end.
+  useDemoStore.getState().insertVertex(100.4, 13.56);
+  const afterInsert = pointsNow();
+
+  // Remove it again by index.
+  useDemoStore.getState().removeVertex(1);
+  const afterRemove = pointsNow().length;
+
+  // And refuse to go below the kind's minimum.
+  useDemoStore.getState().removeVertex(0);
+  useDemoStore.getState().removeVertex(0);
+  const floored = pointsNow().length;
+
+  useDemoStore.getState().clearAll();
+  return {
+    placed,
+    moved,
+    insertedAt: afterInsert.findIndex(
+      (p) => Math.abs(p[0] - 100.4) < 1e-9 && Math.abs(p[1] - 13.56) < 1e-9,
+    ),
+    afterRemove,
+    floored,
+  };
+})();
+
+check(
+  "a sketch is placed from its clicks",
+  editing.placed === 3,
+  { points: editing.placed },
+);
+check(
+  "dragging a handle moves that vertex and no other",
+  editing.moved !== undefined &&
+    Math.abs(editing.moved[0] - 100.52) < 1e-9 &&
+    Math.abs(editing.moved[1] - 13.6) < 1e-9,
+  { vertex1: editing.moved },
+);
+check(
+  // Into the nearest *segment*. Appending would have put it at index 3, which is the
+  // failure this check exists for: an add-point tool that appends is an extend-line tool.
+  "an inserted point splits the nearest segment",
+  editing.insertedAt === 1,
+  { insertedAtIndex: editing.insertedAt },
+);
+check(
+  "removing a point takes it out",
+  editing.afterRemove === 3,
+  { after: editing.afterRemove },
+);
+check(
+  // The floor matters: below it the sketch geometry returns nothing and the shape would
+  // vanish from the map with no way to get it back.
+  "a shape cannot be reduced below its minimum",
+  editing.floored === 2,
+  { floor: 2, ended: editing.floored },
+);
 
 lines.push("");
 lines.push(failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`);
